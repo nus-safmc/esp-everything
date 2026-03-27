@@ -1,0 +1,11 @@
+# Allow task pinning to specific cores
+CONFIG_FREERTOS_UNICORE=n
+
+# UART ISR in IRAM so WiFi cache misses don't stall it
+CONFIG_UART_ISR_IN_IRAM=y
+
+# Enough stack for main task
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
+
+# Tick rate — 1000Hz gives 1ms resolution for vTaskDelayUntil
+CONFIG_FREERTOS_HZ=1000

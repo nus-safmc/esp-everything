@@ -1,0 +1,10 @@
+{
+    "idf.currentSetup": "/home/krithikh/esp/v5.5.1/esp-idf",
+    "idf.openOcdConfigs": [
+        "board/esp32s3-builtin.cfg"
+    ],
+    "idf.customExtraVars": {
+        "OPENOCD_USB_ADAPTER_LOCATION": "3-4",
+        "IDF_TARGET": "esp32s3"
+    }
+}

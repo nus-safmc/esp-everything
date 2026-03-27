@@ -1,0 +1,2 @@
+source /home/krithikh/esp-everything/build/bootloader/gdbinit/symbols
+source /home/krithikh/esp-everything/build/bootloader/gdbinit/connect
