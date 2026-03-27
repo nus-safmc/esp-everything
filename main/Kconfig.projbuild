@@ -1,0 +1,92 @@
+menu "Drone Configuration"
+
+    choice EXAMPLE_IP_MODE
+        prompt "IP Version"
+        depends on EXAMPLE_SOCKET_IP_INPUT_STRING
+        help
+            Example can use either IPV4 or IPV6.
+
+        config EXAMPLE_IPV4
+            bool "IPV4"
+
+        config EXAMPLE_IPV6
+            bool "IPV6"
+            select EXAMPLE_CONNECT_IPV6
+
+    endchoice
+
+    config WIFI_SSID
+        string "Wifi SSID"
+        default "safmc-wifi"
+        help
+            Name of wifi hotspot.
+
+    config WIFI_PASSWORD
+        string "Wifi Password"
+        default "epic-elliot"
+        help 
+            Wifi hotspot password.
+
+    config HOST_IPV4_ADDR
+        string "IPV4 Address"
+        default "192.168.50.160"
+        help
+            IPV4 address to which the client example will send data.
+
+    config TOF_BRIDGE_PORT
+        int "TOF bridge port (outgoing)"
+        range 0 65535
+        default 3333
+        help
+          Port number to send TOF data to (outgoing data)
+
+    config MAVROS_BRIDGE_IN_PORT
+        int "Mavros bridge port (incoming)"
+        range 0 65535
+        default 8888
+        help
+          Port number for central compute to send mavlink packets to (incoming data)
+
+    config MAVROS_BRIDGE_OUT_PORT
+        int "Mavros bridge port (outgoing)"
+        range 0 65535
+        default 14550
+        help
+          Port number for central compute to send mavlink packets to (incoming data)
+
+    config APRILTAG_SEND_PORT
+        int "Port to send apriltag messages to"
+        range 0 65535
+        default 5000
+        help
+          Port to send apriltag messages to
+
+    config TCA_SDA_GPIO_PORT
+        int "GPIO I2C SDA"
+        range 0 50
+        default 1
+        help
+          GPIO Port of the TCA SDA
+
+    config TCA_SCL_GPIO_PORT
+        int "GPIO I2C SCL"
+        range 0 50
+        default 2
+        help
+          GPIO Port of the TCA SCL
+
+    config PX4_TX_PIN 
+        int "GPIO PX4 TX PIN"
+        range 0 50
+        default 5
+        help
+          GPIO PX4 TX PIN
+
+    config PX4_RX_PIN 
+        int "GPIO PX4 RX PIN"
+        range 0 50
+        default 4
+        help
+          GPIO PX4 RX PIN
+
+endmenu

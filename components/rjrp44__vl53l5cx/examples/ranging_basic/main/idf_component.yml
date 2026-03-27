@@ -1,0 +1,6 @@
+version: "1.0.0"
+description: "VL53L5CX basic ranging example"
+dependencies:
+  vl53l5cx:
+    path : ../../..
+    version : "~4.0.0"

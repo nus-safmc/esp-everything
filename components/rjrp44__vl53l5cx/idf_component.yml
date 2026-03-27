@@ -1,0 +1,7 @@
+dependencies:
+  idf: '>=5.4'
+description: A vl53l5cx library for esp32 using the esp-idf framework.
+license: BSD-3-Clause
+repository: https://github.com/RJRP44/VL53L5CX-Library
+url: https://github.com/RJRP44/VL53L5CX-Library
+version: 4.0.0
