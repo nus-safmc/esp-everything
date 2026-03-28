@@ -18,6 +18,10 @@ static bool mission_should_land_from_apriltag(const char *phase)
     return true;
 }
 
+#define PRECISION_ARRIVE_M      0.20f   /* stop approach when this close (m)     */
+#define PRECISION_LAND_TIMEOUT_S 20     /* give up and land anyway after this (s) */
+#define POSE_LOST_HOLD_MS        500    /* hold position if tag drops out         */
+
 /* ---------------------------------------------------------------------------
  * Test parameters — adjust before flight
  * --------------------------------------------------------------------------- */
@@ -39,7 +43,10 @@ static bool mission_should_land_from_apriltag(const char *phase)
  * --------------------------------------------------------------------------- */
 static void mission_task(void *arg)
 {
-    bool nav_goal_active = false;
+    bool  nav_goal_active = false;
+    float target_z   = -(CRUISE_ALT_M);   /* moved up — used in precision landing too */
+    float takeoff_x  = 0.0f;
+    float takeoff_y  = 0.0f;
 
     /* ------------------------------------------------------------------ */
     /* Phase 1: Wait for valid telemetry                                   */
@@ -67,7 +74,7 @@ static void mission_task(void *arg)
     /* ------------------------------------------------------------------ */
     ESP_LOGI(TAG, "Requesting OFFBOARD mode...");
     while(1) {
-        if (mission_should_land_from_apriltag("offboard_request")) goto landing_phase;
+        if (mission_should_land_from_apriltag("offboard_request")) goto precision_landing;
         mavlink_set_offboard_mode();
         vTaskDelay(pdMS_TO_TICKS(500));
         if (mavlink_get_state().custom_main_mode == PX4_MAIN_MODE_OFFBOARD) {
@@ -83,7 +90,7 @@ static void mission_task(void *arg)
     /* ------------------------------------------------------------------ */
     ESP_LOGI(TAG, "Arming...");
     while(1) {
-        if (mission_should_land_from_apriltag("arming")) goto landing_phase;
+        if (mission_should_land_from_apriltag("arming")) goto precision_landing;
         mavlink_arm(true);
         vTaskDelay(pdMS_TO_TICKS(500));
         if (mavlink_get_state().armed) {
@@ -98,16 +105,16 @@ static void mission_task(void *arg)
     /* nav_task is still IDLE — mission_task owns the setpoint.            */
     /* ------------------------------------------------------------------ */
     drone_state_t st = mavlink_get_state();
-    float takeoff_x  = st.x;
-    float takeoff_y  = st.y;
-    float target_z   = -(CRUISE_ALT_M);    /* NED: negative = above ground */
+    takeoff_x  = st.x;
+    takeoff_y  = st.y;
+    // float target_z   = -(CRUISE_ALT_M);    /* NED: negative = above ground */
 
     mavlink_set_position_ned(takeoff_x, takeoff_y, target_z, st.heading);
     ESP_LOGI(TAG, "Taking off to %.1f m AGL (NED z=%.2f)...", CRUISE_ALT_M, target_z);
 
     /* Wait until within altitude tolerance or timeout */
     for (int i = 0; i < TAKEOFF_TIMEOUT_S * 10; i++) {
-        if (mission_should_land_from_apriltag("takeoff")) goto landing_phase;
+        // if (mission_should_land_from_apriltag("takeoff")) goto landing_phase;
         float current_z = mavlink_get_state().z;
         if (fabsf(current_z - target_z) < ALT_TOLERANCE_M) break;
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -132,7 +139,7 @@ static void mission_task(void *arg)
 
     /* Poll navigation status until arrived, stuck, or timeout */
     for (int i = 0; i < NAV_TIMEOUT_S * 5; i++) {   /* 5 polls/s */
-        if (mission_should_land_from_apriltag("navigation")) goto landing_phase;
+        if (mission_should_land_from_apriltag("navigation")) goto precision_landing;
         nav_status_t ns = nav_get_status();
 
         static const char *state_names[] = {
@@ -156,12 +163,78 @@ static void mission_task(void *arg)
         }
         vTaskDelay(pdMS_TO_TICKS(200));
     }
+/* ------------------------------------------------------------------ */
+/* Phase 6a: Precision approach — fly to directly above the tag        */
+/* ------------------------------------------------------------------ */
+precision_landing:
+    ESP_LOGI(TAG, "Precision landing: flying to tag (id=%d)",
+             at_detect_last_id());
 
+    /* Stop any active navigation — mission_task takes back the setpoint */
+    if (nav_goal_active || nav_get_status().state != NAV_IDLE) {
+        nav_cancel();
+        nav_goal_active = false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    {
+        uint32_t lost_since_ms = 0;
+        bool     tag_ever_seen = false;
+
+        for (int i = 0; i < PRECISION_LAND_TIMEOUT_S * 10; i++) {
+
+            at_detect_pose_t pose  = at_detect_get_pose();
+            drone_state_t    drone = mavlink_get_state();
+
+            if (!pose.valid) {
+                mavlink_set_hold();
+                vTaskDelay(pdMS_TO_TICKS(100));
+
+                if (tag_ever_seen) {
+                    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+                    if (lost_since_ms == 0) lost_since_ms = now_ms;
+                    if ((now_ms - lost_since_ms) > POSE_LOST_HOLD_MS) {
+                        ESP_LOGW(TAG, "Tag lost — committing to land anyway");
+                        break;
+                    }
+                }
+                continue;
+            }
+
+            tag_ever_seen  = true;
+            lost_since_ms  = 0;
+
+            float dn, de, hdist;
+            camera_to_ned(pose.tx, pose.ty, pose.tz,
+                          drone.heading, &dn, &de, &hdist);
+
+            ESP_LOGI(TAG, "Precision: hdist=%.2f  dn=%.2f  de=%.2f  "
+                          "[body: fwd=%.2f rgt=%.2f]",
+                     hdist, dn, de,
+                     cosf(drone.heading)*dn + sinf(drone.heading)*de,   /* body_x */
+                    -sinf(drone.heading)*dn + cosf(drone.heading)*de);  /* body_y */
+
+            if (hdist < PRECISION_ARRIVE_M) {
+                ESP_LOGI(TAG, "Above tag (hdist=%.2f m) — committing to land", hdist);
+                break;
+            }
+
+            /* Command: fly to where the tag is, hold cruise altitude */
+            mavlink_set_position_ned(drone.x + dn,
+                                     drone.y + de,
+                                     target_z,
+                                     drone.heading);
+
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+    }
+
+    at_detect_clear_land_request();
     /* ------------------------------------------------------------------ */
     /* Phase 6: Land                                                        */
     /* nav_cancel() returns setpoint ownership to mission_task.            */
     /* ------------------------------------------------------------------ */
-landing_phase:
+// landing_phase:
     if (at_detect_land_requested()) {
         ESP_LOGW(TAG, "Landing due to AprilTag detection (id=%d)", at_detect_last_id());
     }
