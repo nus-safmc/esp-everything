@@ -102,11 +102,18 @@ void vfh_get_histogram(const tof_scan_collapsed_t *scan,
 float vfh_compute(const tof_scan_collapsed_t *scan,
                   const vfh_config_t     *cfg,
                   float                   goal_body_angle_rad,
-                  float                   prev_steering_rad)
+                  float                   prev_steering_rad,
+                  const bool             *extra_blocked)
 {
     float hist[VFH_BINS];
     bool  blocked[VFH_BINS];
     vfh_get_histogram(scan, cfg, hist, blocked);
+
+    /* Overlay virtual obstacles (forbidden zones from stuck recovery) */
+    if (extra_blocked) {
+        for (int b = 0; b < VFH_BINS; b++)
+            if (extra_blocked[b]) blocked[b] = true;
+    }
 
     /* Reference angles in degrees for the cost function */
     float goal_deg = norm360(rad2deg(goal_body_angle_rad));

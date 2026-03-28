@@ -136,7 +136,7 @@ static void mission_task(void *arg)
         nav_status_t ns = nav_get_status();
 
         static const char *state_names[] = {
-            "IDLE", "ROTATING", "FLYING", "ARRIVED", "STUCK"
+            "IDLE", "ROTATING", "FLYING", "ARRIVED", "STUCK", "RETREATING"
         };
         ESP_LOGI(TAG, "nav=%s  dist=%.2f m  free_bins=%d  steer=%.1f°",
                  state_names[ns.state],

@@ -61,7 +61,8 @@ typedef struct {
 float vfh_compute(const tof_scan_collapsed_t *scan,
                   const vfh_config_t     *cfg,
                   float                   goal_body_angle_rad,
-                  float                   prev_steering_rad);
+                  float                   prev_steering_rad,
+                  const bool             *extra_blocked);
 
 /* --------------------------------------------------------------------------
  * vfh_get_histogram
