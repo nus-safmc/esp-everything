@@ -234,7 +234,7 @@ precision_landing:
     /* Phase 6: Land                                                        */
     /* nav_cancel() returns setpoint ownership to mission_task.            */
     /* ------------------------------------------------------------------ */
-landing_phase:
+// landing_phase:
     if (at_detect_land_requested()) {
         ESP_LOGW(TAG, "Landing due to AprilTag detection (id=%d)", at_detect_last_id());
     }

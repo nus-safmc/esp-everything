@@ -26,9 +26,18 @@
 
 #include "freertos/semphr.h"
 
+#include <math.h>
+
 static at_detect_pose_t  s_pose;
 static SemaphoreHandle_t s_pose_mutex;
 
+at_detect_pose_t at_detect_get_pose(void)
+{
+    xSemaphoreTake(s_pose_mutex, portMAX_DELAY);
+    at_detect_pose_t copy = s_pose;
+    xSemaphoreGive(s_pose_mutex);
+    return copy;
+}
 /* Camera is pitched 45° nose-down, 2 cm forward of drone centre.
  *
  * apriltag_pose camera frame (OpenCV): X=right, Y=down, Z=forward
@@ -43,7 +52,7 @@ static SemaphoreHandle_t s_pose_mutex;
 #define CAM_PITCH_DEG       45.0f
 #define CAM_FWD_OFFSET_M    0.02f
 
-static void camera_to_ned(float tx, float ty, float tz,
+void camera_to_ned(float tx, float ty, float tz,
                            float heading,
                            float *out_dn,      /* NED north offset to tag (m) */
                            float *out_de,      /* NED east  offset to tag (m) */
@@ -209,8 +218,6 @@ int avg_img(image_u8_t* im) {
 #define F_Y 153.22210511
 #define C_X 154.00573087
 #define C_Y 107.10222796
-
-#define ESP_CAMERA_SUPPORTED 1
 
 void at_detect_task(void* pvParams)
 {
