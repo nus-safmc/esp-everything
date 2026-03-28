@@ -5,6 +5,7 @@ idf_component_register(
         "tof_task.c"
         "vfh.c"
         "nav_task.c"
+        "at_detect.c"
     INCLUDE_DIRS "."
     REQUIRES
         mavlink
@@ -12,6 +13,9 @@ idf_component_register(
         driver
         freertos
         esp_timer
+        esp-apriltag
+        esp32-camera
+        nvs_flash
 )
 
 # Suppress -Waddress-of-packed-member from MAVLink and VL53L5CX generated headers

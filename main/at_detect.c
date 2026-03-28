@@ -113,7 +113,31 @@ static esp_err_t init_camera(void)
 }
 #endif
 
-#define LOOP_DELAY_MS 5
+#define LOOP_DELAY_MS 100
+
+static volatile bool s_land_requested = false;
+static volatile int  s_last_tag_id = -1;
+
+void at_detect_init(void)
+{
+  s_land_requested = false;
+  s_last_tag_id = -1;
+}
+
+bool at_detect_land_requested(void)
+{
+  return s_land_requested;
+}
+
+void at_detect_clear_land_request(void)
+{
+  s_land_requested = false;
+}
+
+int at_detect_last_id(void)
+{
+  return s_last_tag_id;
+}
 
 void print_img(image_u8_t* im) {
   for (int i = 0; i < im->height; i++) {
@@ -151,19 +175,19 @@ void at_detect_task(void* pvParams)
     }
     // Socket setup
 
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0){
-      ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
-      return;
-    }
+    // int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    // if (sock < 0){
+    //   ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+    //   return;
+    // }
 
-    int opt = 1;
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    const struct sockaddr_in target_addr = {
-      .sin_addr.s_addr = inet_addr(CONFIG_HOST_IPV4_ADDR),
-      .sin_family      = AF_INET,
-      .sin_port        = htons(CONFIG_APRILTAG_SEND_PORT),
-    };
+    // int opt = 1;
+    // setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    // const struct sockaddr_in target_addr = {
+    //   .sin_addr.s_addr = inet_addr(CONFIG_HOST_IPV4_ADDR),
+    //   .sin_family      = AF_INET,
+    //   .sin_port        = htons(CONFIG_APRILTAG_SEND_PORT),
+    // };
 
     // Create tag family object
     apriltag_family_t *tf = tag16h5_create();
@@ -190,6 +214,11 @@ void at_detect_task(void* pvParams)
     while (1)
     {
         camera_fb_t *pic = esp_camera_fb_get();
+      if (pic == NULL) {
+        ESP_LOGW(TAG, "Camera frame grab failed");
+        vTaskDelay(pdMS_TO_TICKS(LOOP_DELAY_MS));
+        continue;
+      }
 
         // ESP_LOGI(TAG, "Picture taken! Its size was: %zu bytes (h=%zu, w=%zu, len=%zu)", pic->len, pic->height, pic->width, pic->len);
 
@@ -214,6 +243,12 @@ void at_detect_task(void* pvParams)
 
           ESP_LOGI(TAG, "Apriltag found! ID=%d, DM=%f, hamming=%d", det->id, det->decision_margin, det->hamming);
 
+          s_last_tag_id = det->id;
+          if (!s_land_requested) {
+            s_land_requested = true;
+            ESP_LOGW(TAG, "Land request raised from AprilTag detection (id=%d)", det->id);
+          }
+
           // First create an apriltag_detection_info_t struct using your known parameters.
           apriltag_detection_info_t info;
           info.det = det;
@@ -224,28 +259,28 @@ void at_detect_task(void* pvParams)
           info.cy = C_Y;
 
           // Then call estimate_tag_pose.
-          apriltag_pose_t pose;
-          double err = estimate_tag_pose(&info, &pose);
+          // apriltag_pose_t pose;
+          // double err = estimate_tag_pose(&info, &pose);
           // if (err > 0.5f) continue; 
 
           // for (int j = 0; j < 3; j++) 
           //   printf("%f ", MATD_EL(pose.t, j, 0));
           // printf("\n");
 
-          struct at_detect_msg out_msg = {
-            .det_id          = det->id,
-            .decision_margin = det->decision_margin,
-            .hamming         = det->hamming,
-          };
-          memcpy(out_msg.t, pose.t, sizeof(double)*3);
-          memcpy(out_msg.R, pose.R, sizeof(double)*9);
-          // Sending message via UDP
-          ESP_LOGI(TAG, "Send struct size=%zu", sizeof(out_msg));
-          int udp_err = sendto(sock, (void*)&out_msg, sizeof(struct at_detect_msg), 0, (const struct sockaddr*) &target_addr, sizeof(target_addr));
-          if (udp_err < 0) {
-            ESP_LOGE(TAG, "Error sending message over UDP, err=%d", udp_err);
-            // break;
-          }
+          // struct at_detect_msg out_msg = {
+          //   .det_id          = det->id,
+          //   .decision_margin = det->decision_margin,
+          //   .hamming         = det->hamming,
+          // };
+          // memcpy(out_msg.t, pose.t, sizeof(double)*3);
+          // memcpy(out_msg.R, pose.R, sizeof(double)*9);
+          // // Sending message via UDP
+          // ESP_LOGI(TAG, "Send struct size=%zu", sizeof(out_msg));
+          // int udp_err = sendto(sock, (void*)&out_msg, sizeof(struct at_detect_msg), 0, (const struct sockaddr*) &target_addr, sizeof(target_addr));
+          // if (udp_err < 0) {
+          //   ESP_LOGE(TAG, "Error sending message over UDP, err=%d", udp_err);
+          //   // break;
+          // }
         }
         ESP_LOGI(TAG, "%d Apriltags Found!", zarray_size(at_detections));
 
@@ -254,7 +289,7 @@ void at_detect_task(void* pvParams)
 
         esp_camera_fb_return(pic);
 
-        vTaskDelay(1);
+        vTaskDelay(pdMS_TO_TICKS(LOOP_DELAY_MS));
     }
 #else
     ESP_LOGE(TAG, "Camera support is not available for this chip");

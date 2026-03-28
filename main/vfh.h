@@ -39,7 +39,7 @@ typedef struct {
     .w_goal            = 2.0f,  \
     .w_current         = 1.5f,  \
     .w_prev            = 0.5f,  \
-    .density_threshold = 1.0f,  \
+    .density_threshold = 1.5f,  \
     .drone_radius_m    = 0.25f, \
     .max_range_m       = 4.0f,  \
 }

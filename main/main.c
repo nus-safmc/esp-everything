@@ -5,17 +5,25 @@
 #include "mavlink_task.h"
 #include "tof_task.h"
 #include "nav_task.h"
+#include "at_detect.h"
 
 #include <math.h>
 
 static const char *TAG = "mission";
+
+static bool mission_should_land_from_apriltag(const char *phase)
+{
+    if (!at_detect_land_requested()) return false;
+    ESP_LOGW(TAG, "AprilTag land trigger in phase: %s (id=%d)", phase, at_detect_last_id());
+    return true;
+}
 
 /* ---------------------------------------------------------------------------
  * Test parameters — adjust before flight
  * --------------------------------------------------------------------------- */
 #define CRUISE_ALT_M        0.5f    /* target altitude above takeoff (m)        */
 #define GOAL_OFFSET_X_M     2.0f    /* goal North offset from takeoff (m)       */
-#define GOAL_OFFSET_Y_M     0.0f    /* goal East  offset from takeoff (m)       */
+#define GOAL_OFFSET_Y_M     1.6f    /* goal East  offset from takeoff (m)       */
 #define TAKEOFF_TIMEOUT_S   10      /* max seconds to wait for altitude (s)     */
 #define NAV_TIMEOUT_S       60      /* max seconds to wait for goal arrival (s) */
 #define LAND_TIMEOUT_S      20      /* max seconds to wait for disarm (s)       */
@@ -31,6 +39,8 @@ static const char *TAG = "mission";
  * --------------------------------------------------------------------------- */
 static void mission_task(void *arg)
 {
+    bool nav_goal_active = false;
+
     /* ------------------------------------------------------------------ */
     /* Phase 1: Wait for valid telemetry                                   */
     /* ------------------------------------------------------------------ */
@@ -57,6 +67,7 @@ static void mission_task(void *arg)
     /* ------------------------------------------------------------------ */
     ESP_LOGI(TAG, "Requesting OFFBOARD mode...");
     while(1) {
+        if (mission_should_land_from_apriltag("offboard_request")) goto landing_phase;
         mavlink_set_offboard_mode();
         vTaskDelay(pdMS_TO_TICKS(500));
         if (mavlink_get_state().custom_main_mode == PX4_MAIN_MODE_OFFBOARD) {
@@ -72,6 +83,7 @@ static void mission_task(void *arg)
     /* ------------------------------------------------------------------ */
     ESP_LOGI(TAG, "Arming...");
     while(1) {
+        if (mission_should_land_from_apriltag("arming")) goto landing_phase;
         mavlink_arm(true);
         vTaskDelay(pdMS_TO_TICKS(500));
         if (mavlink_get_state().armed) {
@@ -95,6 +107,7 @@ static void mission_task(void *arg)
 
     /* Wait until within altitude tolerance or timeout */
     for (int i = 0; i < TAKEOFF_TIMEOUT_S * 10; i++) {
+        if (mission_should_land_from_apriltag("takeoff")) goto landing_phase;
         float current_z = mavlink_get_state().z;
         if (fabsf(current_z - target_z) < ALT_TOLERANCE_M) break;
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -114,10 +127,12 @@ static void mission_task(void *arg)
     float goal_x = takeoff_x + GOAL_OFFSET_X_M;
     float goal_y = takeoff_y + GOAL_OFFSET_Y_M;
     nav_set_goal_ned(goal_x, goal_y, target_z);
+    nav_goal_active = true;
     ESP_LOGI(TAG, "Goal: NED (%.2f, %.2f, %.2f)  —  navigating...", goal_x, goal_y, target_z);
 
     /* Poll navigation status until arrived, stuck, or timeout */
     for (int i = 0; i < NAV_TIMEOUT_S * 5; i++) {   /* 5 polls/s */
+        if (mission_should_land_from_apriltag("navigation")) goto landing_phase;
         nav_status_t ns = nav_get_status();
 
         static const char *state_names[] = {
@@ -131,10 +146,12 @@ static void mission_task(void *arg)
 
         if (ns.state == NAV_ARRIVED) {
             ESP_LOGI(TAG, "Goal reached!");
+            nav_goal_active = false;
             break;
         }
         if (ns.state == NAV_STUCK && ns.stuck_count > 3) {
             ESP_LOGW(TAG, "Navigator stuck repeatedly — aborting mission");
+            nav_goal_active = false;
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(200));
@@ -144,7 +161,14 @@ static void mission_task(void *arg)
     /* Phase 6: Land                                                        */
     /* nav_cancel() returns setpoint ownership to mission_task.            */
     /* ------------------------------------------------------------------ */
-    nav_cancel();
+landing_phase:
+    if (at_detect_land_requested()) {
+        ESP_LOGW(TAG, "Landing due to AprilTag detection (id=%d)", at_detect_last_id());
+    }
+
+    if (nav_goal_active || nav_get_status().state != NAV_IDLE) {
+        nav_cancel();
+    }
     vTaskDelay(pdMS_TO_TICKS(200));   /* let hold setpoint be picked up */
 
     mavlink_send_land_command();
@@ -174,6 +198,7 @@ void app_main(void)
     mavlink_task_init();
     tof_task_init();
     nav_task_init();
+    at_detect_init();
 
     /* Core 0: hardware-facing tasks */
     xTaskCreatePinnedToCore(
@@ -190,6 +215,10 @@ void app_main(void)
     xTaskCreatePinnedToCore(
         nav_task, "nav", NAV_TASK_STACK,
         NULL, NAV_TASK_PRIORITY, NULL, NAV_TASK_CORE
+    );
+    xTaskCreatePinnedToCore(
+        at_detect_task, "apriltag", AT_TASK_STACK,
+        NULL, AT_TASK_PRIORITY, NULL, AT_TASK_CORE
     );
     xTaskCreatePinnedToCore(
         mission_task, "mission", 4096,

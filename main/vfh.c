@@ -68,14 +68,29 @@ void vfh_get_histogram(const tof_scan_collapsed_t *scan,
 
     /* ----- Stage 3: grow blocked sectors by drone_radius -----
      *
-     * Conservative fixed growth of 3 bins (~34°) each side.  Sized for
-     * clearing convex corners at typical engagement range (~0.5 m). */
+     * For each blocked bin, the growth angle depends on the closest obstacle
+     * range in that bin:  grow_angle = atan(drone_radius / range).
+     * Close obstacles need more growth than far ones.
+     */
+    float bin_min_range[VFH_BINS];
+    for (int b = 0; b < VFH_BINS; b++)
+        bin_min_range[b] = cfg->max_range_m;
+    for (int i = 0; i < TOF_SENSOR_COUNT * TOF_SENSOR_RESO; i++) {
+        float r = scan->ranges[i];
+        if (!isfinite(r) || r <= 0.0f || r > cfg->max_range_m) continue;
+        int b = i / 2;
+        if (r < bin_min_range[b]) bin_min_range[b] = r;
+    }
+
     bool raw[VFH_BINS];
     memcpy(raw, binary_out, VFH_BINS * sizeof(bool));
 
     for (int b = 0; b < VFH_BINS; b++) {
         if (!raw[b]) continue;
-        for (int d = 1; d <= 3; d++) {
+        float grow_deg = rad2deg(atanf(cfg->drone_radius_m / bin_min_range[b]));
+        int   grow_n   = (int)ceilf(grow_deg / BIN_WIDTH_DEG);
+        if (grow_n < 1) grow_n = 1;
+        for (int d = 1; d <= grow_n; d++) {
             binary_out[(b - d + VFH_BINS) % VFH_BINS] = true;
             binary_out[(b + d)             % VFH_BINS] = true;
         }
