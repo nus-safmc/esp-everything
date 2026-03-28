@@ -9,7 +9,6 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-/* ---- compile-time constants derived from VFH_BINS ---- */
 #define BIN_WIDTH_DEG   (360.0f / (float)VFH_BINS)  
 
 /* ---- local helpers ---- */
@@ -17,7 +16,7 @@
 static float deg2rad(float d) { return d * ((float)M_PI / 180.0f); }
 static float rad2deg(float r) { return r * (180.0f / (float)M_PI); }
 
-/* Normalise angle to [0, 360) degrees */
+//normalise angle between 0 and 360 deg
 static float norm360(float a)
 {
     a = fmodf(a, 360.0f);
@@ -44,8 +43,6 @@ static float bin_center_deg(int b)
     return ((float)b + 0.5f) * BIN_WIDTH_DEG;
 }
 
-/* ========================================================================== */
-
 void vfh_get_histogram(const tof_scan_collapsed_t *scan,
                        const vfh_config_t     *cfg,
                        float                   hist_out[VFH_BINS],
@@ -71,22 +68,14 @@ void vfh_get_histogram(const tof_scan_collapsed_t *scan,
 
     /* ----- Stage 3: grow blocked sectors by drone_radius -----
      *
-     * Half-angle subtended by the drone radius at max range:
-     *   grow_angle = atan(drone_radius / max_range)   [conservative — closest approach]
-     *
-     * We ceiling-round to bins so we never under-estimate the safety bubble.
-     */
-    float grow_angle_deg = rad2deg(atanf(cfg->drone_radius_m / cfg->max_range_m));
-    int   grow_n         = (int)ceilf(grow_angle_deg / BIN_WIDTH_DEG);
-    if (grow_n < 1) grow_n = 1;
-
-    /* Work from a snapshot so expansions don't cascade */
+     * Conservative fixed growth of 3 bins (~34°) each side.  Sized for
+     * clearing convex corners at typical engagement range (~0.5 m). */
     bool raw[VFH_BINS];
     memcpy(raw, binary_out, VFH_BINS * sizeof(bool));
 
     for (int b = 0; b < VFH_BINS; b++) {
         if (!raw[b]) continue;
-        for (int d = 1; d <= grow_n; d++) {
+        for (int d = 1; d <= 3; d++) {
             binary_out[(b - d + VFH_BINS) % VFH_BINS] = true;
             binary_out[(b + d)             % VFH_BINS] = true;
         }

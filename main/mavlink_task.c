@@ -43,12 +43,17 @@ static const char *TAG = "mav";
 // Velocity-only: use vx,vy,vz + yaw_rate — ignore position, accel, yaw
 // Bits set: pos(0-2)=0x007, accel(6-8)=0x1C0, yaw(10)=0x400
 // Bits clear: vel(3-5), yaw_rate(11)
-#define TYPEMASK_VELOCITY   (uint16_t)(0x007 | 0x1C0 | 0x400)   // 0x5C7
+#define TYPEMASK_VELOCITY       (uint16_t)(0x007 | 0x1C0 | 0x400)   // 0x5C7
 
 // Position-only: use x,y,z + yaw — ignore velocity, accel, yaw_rate
 // Bits set: vel(3-5)=0x038, accel(6-8)=0x1C0, yaw_rate(11)=0x800
 // Bits clear: pos(0-2), yaw(10)
-#define TYPEMASK_POSITION   (uint16_t)(0x038 | 0x1C0 | 0x800)   // 0x9F8
+#define TYPEMASK_POSITION       (uint16_t)(0x038 | 0x1C0 | 0x800)   // 0x9F8
+
+// Mixed XY-velocity + Z-position + yaw-position:
+//   Use: vx(3), vy(4), z(2), yaw(10)  → bits clear
+//   Ignore: x(0), y(1), vz(5), accel(6-8), yaw_rate(11)  → bits set
+#define TYPEMASK_VEL_XY_POS_Z  (uint16_t)(0x001 | 0x002 | 0x020 | 0x1C0 | 0x800)  // 0x9E3
 
 // ---------------------------------------------------------------------------
 // PX4 custom modes (needed for MAV_CMD_DO_SET_MODE)
@@ -61,7 +66,8 @@ static const char *TAG = "mav";
 typedef enum {
     SP_VELOCITY,
     SP_POSITION,
-    SP_HOLD          // position hold at last known location
+    SP_VEL_XY_POS_Z, // XY velocity + Z position + yaw_rate
+    SP_HOLD           // position hold at last known location
 } sp_type_t;
 
 typedef struct {
@@ -150,6 +156,25 @@ static void send_setpoint(void)
             NAN, NAN, NAN,              // accel     — ignored
             NAN,                        // yaw       — ignored (MUST be NaN)
             sp.yaw_rate                 // yaw_rate  — used
+        );
+
+    } else if (sp.type == SP_VEL_XY_POS_Z) {
+        // Mixed mode: XY velocity + Z position + yaw position.
+        // Unused position axes (x,y) and velocity axis (vz) MUST be NaN.
+        mavlink_msg_set_position_target_local_ned_pack(
+            OBC_SYSID,
+            OBC_COMPID,
+            &msg,
+            (uint32_t)(esp_timer_get_time() / 1000),
+            PX4_SYSID,
+            PX4_COMPID,
+            MAV_FRAME_LOCAL_NED,
+            TYPEMASK_VEL_XY_POS_Z,
+            NAN, NAN, sp.z,             // x,y ignored; z used
+            sp.vx, sp.vy, NAN,          // vx,vy used; vz ignored
+            NAN, NAN, NAN,              // accel    — ignored
+            sp.yaw,                     // yaw      — used
+            NAN                         // yaw_rate — ignored
         );
 
     } else {
@@ -287,9 +312,8 @@ static void parse_incoming(void)
             mavlink_attitude_t att;
             mavlink_msg_attitude_decode(&msg, &att);
 
-            // PX4 yaw: ENU CCW positive → convert to NED CW positive
-            // NED heading = -yaw (ENU), then wrap to [0, 2π)
-            float heading = -att.yaw;
+            // Wrap from (-π, π] to [0, 2π) for internal use.
+            float heading = att.yaw;
             if (heading < 0.0f) heading += 2.0f * (float)M_PI;
 
             xSemaphoreTake(s_state_mutex, portMAX_DELAY);
@@ -353,6 +377,17 @@ void mavlink_set_velocity_ned(float vx, float vy, float vz, float yaw_rate)
     s_sp.vy       = vy;
     s_sp.vz       = vz;
     s_sp.yaw_rate = yaw_rate;
+    xSemaphoreGive(s_sp_mutex);
+}
+
+void mavlink_set_velocity_xy_position_z(float vx, float vy, float z, float yaw)
+{
+    xSemaphoreTake(s_sp_mutex, portMAX_DELAY);
+    s_sp.type = SP_VEL_XY_POS_Z;
+    s_sp.vx   = vx;
+    s_sp.vy   = vy;
+    s_sp.z    = z;
+    s_sp.yaw  = yaw;
     xSemaphoreGive(s_sp_mutex);
 }
 

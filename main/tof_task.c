@@ -18,8 +18,9 @@ static const char *TAG = "tof";
 
 // ---------------------------------------------------------------------------
 // Sensor angle table (body frame, degrees, CW from forward)
+// Computed in tof_task_init() from TOF_FRONT_SENSOR_IDX.
 // ---------------------------------------------------------------------------
-static const float SENSOR_ANGLES[TOF_SENSOR_COUNT] = TOF_SENSOR_ANGLES_DEG;
+static float SENSOR_ANGLES[TOF_SENSOR_COUNT];
 
 // ---------------------------------------------------------------------------
 // Shared scan state — written by tof_task, read by mission_task
@@ -55,15 +56,18 @@ static esp_err_t tca_select(uint8_t port)
 static float frame_min_range_m(const tof_frame_t *f)
 {
     float min_m = INFINITY;
-    for (int i = 0; i < TOF_PIXELS_PER_SENSOR; i++) {
-        uint8_t  status = f->target_status[i];
-        uint16_t dist   = f->distance_mm[i];
+    for (int row = 4; row < 8; row++) {
+        for (int col = 0; col < 8; col++) {
+            int      i      = row * 8 + col;
+            uint8_t  status = f->target_status[i];
+            uint16_t dist   = f->distance_mm[i];
 
-        if (status != 5 && status != 9) continue;
-        if (dist < TOF_MIN_VALID_MM || dist > TOF_MAX_VALID_MM) continue;
+            if (status != 5 && status != 9) continue;
+            if (dist < TOF_MIN_VALID_MM || dist > TOF_MAX_VALID_MM) continue;
 
-        float m = (float)dist / 1000.0f;
-        if (m < min_m) min_m = m;
+            float m = (float)dist / 1000.0f;
+            if (m < min_m) min_m = m;
+        }
     }
     return min_m;
 }
@@ -167,8 +171,11 @@ static bool sensor_overlaps_sector(float sensor_center_deg,
 void tof_task_init(void)
 {
     memset(&s_scan, 0, sizeof(s_scan));
-    // sensor_ok[] and frame[].valid start at 0 — callers must check valid flag
-    // before using frame data.
+
+    // Compute CCW sensor angles from front sensor index
+    for (int i = 0; i < TOF_SENSOR_COUNT; i++) {
+        SENSOR_ANGLES[i] = (float)(((TOF_FRONT_SENSOR_IDX - i) * 45 % 360 + 360) % 360);
+    }
 
     s_scan_mutex = xSemaphoreCreateMutex();
     configASSERT(s_scan_mutex != NULL);
@@ -221,39 +228,39 @@ tof_scan_collapsed_t tof_get_collapsed_scan(void)
 {
     tof_scan_t snap = tof_get_scan();  /* thread-safe snapshot */
 
-    static const float ANGLES[TOF_SENSOR_COUNT] = TOF_SENSOR_ANGLES_DEG;
-
     tof_scan_collapsed_t out;
-
-    for (int i=0; i<TOF_SENSOR_COUNT*TOF_SENSOR_RESO; i++){
+    for (int i = 0; i < TOF_SENSOR_COUNT * TOF_SENSOR_RESO; i++)
         out.ranges[i] = INFINITY;
-    }
 
     for (int s = 0; s < TOF_SENSOR_COUNT; s++) {
         if (!snap.sensor_ok[s] || !snap.frame[s].valid) continue;
         const tof_frame_t *f = &snap.frame[s];
 
         for (int col = 0; col < 8; col++) {
-            /* Column j maps to an angular offset within the sensor's 45° arc.
-             * j=0 → −19.6875°, j=7 → +19.6875° relative to sensor centre. */
-            float angle_deg = ANGLES[s] + ((float)col - 3.5f) * (45.0f / 8.0f);
+            /* Sensors right-side up: raw col 0 = RIGHT of FoV (from lens).
+             * col 0 → +offset (CW), col 7 → −offset (CCW). */
+            float angle_deg = SENSOR_ANGLES[s] + (3.5f - (float)col) * (45.0f / 8.0f);
 
-            //Get minimum value in each column only sampling upper rows due to drone body below
+            /* Rows 4-7 = physical upper half (sensors mounted upside-down) */
             for (int row = 4; row < 8; row++) {
                 int      px     = row * 8 + col;
                 uint8_t  status = f->target_status[px];
                 uint16_t dist   = f->distance_mm[px];
 
-                if (status != 5 && status != 9) continue; //check if status is valid
+                if (status != 5 && status != 9) continue;
                 if (dist < TOF_MIN_VALID_MM || dist > TOF_MAX_VALID_MM) continue;
 
-                int bin = angle_deg / 64; // integer division, round down to get bin number
+                float norm_angle = fmodf(angle_deg, 360.0f);
+                if (norm_angle < 0.0f) norm_angle += 360.0f;
+                int idx = (int)(norm_angle * (float)(TOF_SENSOR_COUNT * TOF_SENSOR_RESO) / 360.0f);
+                if (idx >= TOF_SENSOR_COUNT * TOF_SENSOR_RESO) idx = TOF_SENSOR_COUNT * TOF_SENSOR_RESO - 1;
 
                 float dist_m = (float)dist / 1000.0f;
-                if(dist_m < out.ranges[bin]){
-                    out.ranges[bin] = dist_m;
-                }
+                if (dist_m < out.ranges[idx])
+                    out.ranges[idx] = dist_m;
+                // printf("(%d: %zu)", idx, dist);
             }
+            // printf("\n");
         }
     }
 

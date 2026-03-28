@@ -25,26 +25,14 @@
 // ---------------------------------------------------------------------------
 // Sensor angular layout
 //
-// Defines which physical direction each sensor (0-7) faces, in degrees.
-// 0° = forward, angles increase clockwise (same convention as NED yaw).
-// Edit this to match your physical ring mounting.
+// Sensors are mounted COUNTER-CLOCKWISE around the ring.  The front-facing
+// sensor index is set via menuconfig (TOF_FRONT_SENSOR_IDX).
 //
-//         Front (0°)
-//           [0]
-//    [7]         [1]
-//  (315°)         (45°)
+// Angle for sensor i = ((front_idx - i) * 45) mod 360  (degrees, CW+)
 //
-//  [6]               [2]
-// (270°)             (90°)
-//
-//    [5]         [3]
-//  (225°)         (135°)
-//           [4]
-//         (180°)
+// The angle table is computed at runtime in tof_task_init().
 // ---------------------------------------------------------------------------
-#define TOF_SENSOR_ANGLES_DEG   { 0.0f, 45.0f, 90.0f, 135.0f, 180.0f, 225.0f, 270.0f, 315.0f }
-
-// Half-width of each sensor's coverage arc (360° / 8 sensors / 2)
+#define TOF_FRONT_SENSOR_IDX        CONFIG_TOF_FRONT_SENSOR_IDX
 #define TOF_SENSOR_HALF_WIDTH_DEG   22.5f
 
 // Number of pixels per sensor frame (8x8 grid × 1 target per zone).

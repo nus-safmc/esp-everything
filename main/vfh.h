@@ -37,10 +37,10 @@ typedef struct {
  * -------------------------------------------------------------------------- */
 #define VFH_DEFAULT_CONFIG  {   \
     .w_goal            = 2.0f,  \
-    .w_current         = 1.0f,  \
+    .w_current         = 1.5f,  \
     .w_prev            = 0.5f,  \
     .density_threshold = 1.0f,  \
-    .drone_radius_m    = 0.20f, \
+    .drone_radius_m    = 0.25f, \
     .max_range_m       = 4.0f,  \
 }
 
