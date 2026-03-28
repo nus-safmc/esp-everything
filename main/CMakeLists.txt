@@ -3,6 +3,7 @@ idf_component_register(
         "main.c"
         "mavlink_task.c"
         "tof_task.c"
+        "vfh.c"
     INCLUDE_DIRS "."
     REQUIRES
         mavlink

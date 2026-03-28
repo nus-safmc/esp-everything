@@ -217,6 +217,49 @@ bool tof_is_healthy(void)
     return (now_ms - latest_ms) < 500;
 }
 
+tof_scan_collapsed_t tof_get_collapsed_scan(void)
+{
+    tof_scan_t snap = tof_get_scan();  /* thread-safe snapshot */
+
+    static const float ANGLES[TOF_SENSOR_COUNT] = TOF_SENSOR_ANGLES_DEG;
+
+    tof_scan_collapsed_t out;
+
+    for (int i=0; i<TOF_SENSOR_COUNT*TOF_SENSOR_RESO; i++){
+        out.ranges[i] = INFINITY;
+    }
+
+    for (int s = 0; s < TOF_SENSOR_COUNT; s++) {
+        if (!snap.sensor_ok[s] || !snap.frame[s].valid) continue;
+        const tof_frame_t *f = &snap.frame[s];
+
+        for (int col = 0; col < 8; col++) {
+            /* Column j maps to an angular offset within the sensor's 45° arc.
+             * j=0 → −19.6875°, j=7 → +19.6875° relative to sensor centre. */
+            float angle_deg = ANGLES[s] + ((float)col - 3.5f) * (45.0f / 8.0f);
+
+            //Get minimum value in each column only sampling upper rows due to drone body below
+            for (int row = 4; row < 8; row++) {
+                int      px     = row * 8 + col;
+                uint8_t  status = f->target_status[px];
+                uint16_t dist   = f->distance_mm[px];
+
+                if (status != 5 && status != 9) continue; //check if status is valid
+                if (dist < TOF_MIN_VALID_MM || dist > TOF_MAX_VALID_MM) continue;
+
+                int bin = angle_deg / 64; // integer division, round down to get bin number
+
+                float dist_m = (float)dist / 1000.0f;
+                if(dist_m < out.ranges[bin]){
+                    out.ranges[bin] = dist_m;
+                }
+            }
+        }
+    }
+
+    return out;
+}
+
 // ---------------------------------------------------------------------------
 // FreeRTOS task
 // ---------------------------------------------------------------------------

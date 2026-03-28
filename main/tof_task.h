@@ -8,6 +8,7 @@
 // Hardware config
 // ---------------------------------------------------------------------------
 #define TOF_SENSOR_COUNT        8
+#define TOF_SENSOR_RESO         8
 #define TOF_I2C_PORT            I2C_NUM_0
 #define TOF_SDA_PIN             CONFIG_TCA_SDA_GPIO_PORT   // from menuconfig
 #define TOF_SCL_PIN             CONFIG_TCA_SCL_GPIO_PORT
@@ -49,7 +50,7 @@
 // Number of pixels per sensor frame (8x8 grid × 1 target per zone).
 // Matches VL53L5CX_RESOLUTION_8X8 * VL53L5CX_NB_TARGET_PER_ZONE without
 // pulling vl53l5cx_api.h into this header.
-#define TOF_PIXELS_PER_SENSOR       64
+#define TOF_PIXELS_PER_SENSOR       TOF_SENSOR_RESO * TOF_SENSOR_RESO
 
 // ---------------------------------------------------------------------------
 // Per-sensor frame — raw data exactly as returned by vl53l5cx_get_ranging_data
@@ -99,8 +100,19 @@ void tof_task(void *arg);
 float tof_get_min_range_in_sector(float angle_min_deg, float angle_max_deg);
 
 // Full scan snapshot — returns a copy of the latest scan data.
-// Use for telemetry or when you need all 8 readings at once.
+// Use for telemetry or when you need all readings at once.
 tof_scan_t tof_get_scan(void);
+
+// Collapse the 8-sensor ring into a flat 2D scan 
+// For each sensor, get the minimum of each column for rows 3-7
+// Maximum count = 64 (8 sensors × 8 columns).
+// Thread-safe: takes the scan mutex internally via tof_get_scan().
+
+typedef struct {
+    float ranges[TOF_SENSOR_COUNT * TOF_SENSOR_RESO];
+} tof_scan_collapsed_t;
+
+tof_scan_collapsed_t tof_get_collapsed_scan(void);
 
 // True if at least one sensor has been successfully initialised and
 // has produced a reading in the last 500ms.
