@@ -24,6 +24,47 @@
 
 #include "at_detect.h"
 
+#include "freertos/semphr.h"
+
+static at_detect_pose_t  s_pose;
+static SemaphoreHandle_t s_pose_mutex;
+
+/* Camera is pitched 45° nose-down, 2 cm forward of drone centre.
+ *
+ * apriltag_pose camera frame (OpenCV): X=right, Y=down, Z=forward
+ * Body frame:                          X=fwd,   Y=rgt,  Z=down
+ *
+ * R_cam_to_body (45° pitch-down):
+ *   body_x =  cos45·tz − sin45·ty   (forward)
+ *   body_y =  tx                     (right)
+ *   body_z =  cos45·ty + sin45·tz   (down — used for altitude sanity only)
+ *
+ * Mount offset: camera is CAM_FWD_OFFSET_M ahead of CoM. */
+#define CAM_PITCH_DEG       45.0f
+#define CAM_FWD_OFFSET_M    0.02f
+
+static void camera_to_ned(float tx, float ty, float tz,
+                           float heading,
+                           float *out_dn,      /* NED north offset to tag (m) */
+                           float *out_de,      /* NED east  offset to tag (m) */
+                           float *out_hdist)   /* horizontal distance to tag  */
+{
+    const float pitch = CAM_PITCH_DEG * (float)M_PI / 180.0f;
+    const float cp    = cosf(pitch);   /* cos 45° = 0.7071 */
+    const float sp    = sinf(pitch);   /* sin 45° = 0.7071 */
+
+    /* Camera frame → body frame */
+    float body_x = cp * tz - sp * ty + CAM_FWD_OFFSET_M;   /* forward */
+    float body_y = tx;                                        /* right   */
+    /* float body_z = cp*ty + sp*tz; */    /* down — tag altitude, not needed yet */
+
+    /* Horizontal distance from drone centre to tag (frame-invariant) */
+    *out_hdist = sqrtf(body_x * body_x + body_y * body_y);
+
+    /* Body frame → NED world frame */
+    *out_dn = body_x * cosf(heading) - body_y * sinf(heading);
+    *out_de = body_x * sinf(heading) + body_y * cosf(heading);
+}
 // support IDF 5.x
 #ifndef portTICK_RATE_MS
 #define portTICK_RATE_MS portTICK_PERIOD_MS
@@ -120,8 +161,11 @@ static volatile int  s_last_tag_id = -1;
 
 void at_detect_init(void)
 {
-  s_land_requested = false;
-  s_last_tag_id = -1;
+    s_land_requested = false;
+    s_last_tag_id    = -1;
+    memset(&s_pose, 0, sizeof(s_pose));
+    s_pose_mutex = xSemaphoreCreateMutex();
+    configASSERT(s_pose_mutex != NULL);
 }
 
 bool at_detect_land_requested(void)
@@ -166,6 +210,7 @@ int avg_img(image_u8_t* im) {
 #define C_X 154.00573087
 #define C_Y 107.10222796
 
+#define ESP_CAMERA_SUPPORTED 1
 
 void at_detect_task(void* pvParams)
 {
@@ -242,45 +287,42 @@ void at_detect_task(void* pvParams)
           if (det->hamming > 1 || det->decision_margin <= 40.0) continue;
 
           ESP_LOGI(TAG, "Apriltag found! ID=%d, DM=%f, hamming=%d", det->id, det->decision_margin, det->hamming);
-
           s_last_tag_id = det->id;
-          if (!s_land_requested) {
-            s_land_requested = true;
-            ESP_LOGW(TAG, "Land request raised from AprilTag detection (id=%d)", det->id);
+
+          /* --- Pose estimation (was commented out) --- */
+          apriltag_detection_info_t info = {
+            .det     = det,
+            .tagsize = TAG_SIZE,
+            .fx = F_X, .fy = F_Y,
+            .cx = C_X, .cy = C_Y,
+          };
+          apriltag_pose_t pose;
+          double err = estimate_tag_pose(&info, &pose);
+
+          /* Only trust estimates with low reprojection error */
+          if (err < 0.5) {
+            xSemaphoreTake(s_pose_mutex, portMAX_DELAY);
+            s_pose.tx    = (float)MATD_EL(pose.t, 0, 0);
+            s_pose.ty    = (float)MATD_EL(pose.t, 1, 0);
+            s_pose.tz    = (float)MATD_EL(pose.t, 2, 0);
+            s_pose.valid = true;
+            s_pose.tag_id = det->id;
+            xSemaphoreGive(s_pose_mutex);
+
+            if (!s_land_requested) {
+              s_land_requested = true;
+              ESP_LOGW(TAG, "Land request raised (id=%d err=%.3f "
+                  "t=[%.2f,%.2f,%.2f])",
+                  det->id, err,
+                  s_pose.tx, s_pose.ty, s_pose.tz);
+            }
+          } else {
+            ESP_LOGW(TAG, "Pose error too high (%.3f) — skipping", err);
           }
 
-          // First create an apriltag_detection_info_t struct using your known parameters.
-          apriltag_detection_info_t info;
-          info.det = det;
-          info.tagsize = TAG_SIZE;
-          info.fx = F_X;
-          info.fy = F_Y;
-          info.cx = C_X;
-          info.cy = C_Y;
+          matd_destroy(pose.R);
+          matd_destroy(pose.t);
 
-          // Then call estimate_tag_pose.
-          // apriltag_pose_t pose;
-          // double err = estimate_tag_pose(&info, &pose);
-          // if (err > 0.5f) continue; 
-
-          // for (int j = 0; j < 3; j++) 
-          //   printf("%f ", MATD_EL(pose.t, j, 0));
-          // printf("\n");
-
-          // struct at_detect_msg out_msg = {
-          //   .det_id          = det->id,
-          //   .decision_margin = det->decision_margin,
-          //   .hamming         = det->hamming,
-          // };
-          // memcpy(out_msg.t, pose.t, sizeof(double)*3);
-          // memcpy(out_msg.R, pose.R, sizeof(double)*9);
-          // // Sending message via UDP
-          // ESP_LOGI(TAG, "Send struct size=%zu", sizeof(out_msg));
-          // int udp_err = sendto(sock, (void*)&out_msg, sizeof(struct at_detect_msg), 0, (const struct sockaddr*) &target_addr, sizeof(target_addr));
-          // if (udp_err < 0) {
-          //   ESP_LOGE(TAG, "Error sending message over UDP, err=%d", udp_err);
-          //   // break;
-          // }
         }
         ESP_LOGI(TAG, "%d Apriltags Found!", zarray_size(at_detections));
 
