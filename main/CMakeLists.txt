@@ -6,6 +6,7 @@ idf_component_register(
         "vfh.c"
         "nav_task.c"
         "at_detect.c"
+        "breadcrumb.c"
     INCLUDE_DIRS "."
     REQUIRES
         mavlink
