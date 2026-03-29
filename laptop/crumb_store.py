@@ -1,9 +1,12 @@
 """
-CrumbStore — aggregates breadcrumb trails from all drones, transformed
-into a shared map frame, with a KDTree for spatial density queries.
+CrumbStore — aggregates breadcrumb trails from all drones in the shared
+map frame, with a KDTree for spatial density queries.
+
+Crumb positions arrive already in map frame from the ESP32 firmware
+(converted via odom_to_map before transmission).
 
 Usage:
-    store = CrumbStore("setup.yaml")
+    store = CrumbStore()
     store.add_crumbs(drone_id=0, crumbs=[(1.0, 2.0), (1.4, 2.1)],
                      start_index=0)
     density = store.cone_density(origin=(3.0, 1.0), direction_rad=0.5,
@@ -13,21 +16,13 @@ Usage:
 
 import math
 import threading
-from pathlib import Path
 
 import numpy as np
-import yaml
 from scipy.spatial import cKDTree
 
 
 class CrumbStore:
-    def __init__(self, config_path: str = "setup.yaml"):
-        cfg = yaml.safe_load(Path(config_path).read_text())
-        # {drone_id: (offset_x, offset_y)}
-        self._offsets: dict[int, tuple[float, float]] = {}
-        for did, props in cfg["drones"].items():
-            self._offsets[int(did)] = (props["start_x"], props["start_y"])
-
+    def __init__(self):
         # Per-drone ordered trail (map frame)
         self._trails: dict[int, list[tuple[float, float]]] = {}
         # Expected next index per drone (for dedup / ordering)
@@ -52,17 +47,14 @@ class CrumbStore:
         start_index: int,
     ) -> None:
         """
-        Append crumbs from a telemetry packet.  Crumbs are in the drone's
-        local NED frame and are transformed to the shared map frame using
-        the drone's start offset from setup.yaml.
+        Append crumbs from a telemetry packet.  Crumbs arrive already in
+        the shared map frame (converted on the ESP32 via odom_to_map).
 
         start_index: the crumb_batch_start from the telemetry packet, used
                      to place crumbs at the correct trail position.
         """
         if not crumbs:
             return
-
-        ox, oy = self._offsets.get(drone_id, (0.0, 0.0))
 
         with self._lock:
             if drone_id not in self._trails:
@@ -77,13 +69,11 @@ class CrumbStore:
             if not new_crumbs:
                 return
 
-            # Transform to map frame and append
-            mapped = [(x + ox, y + oy) for x, y in new_crumbs]
-            self._trails[drone_id].extend(mapped)
+            self._trails[drone_id].extend(new_crumbs)
             self._next_idx[drone_id] = start_index + len(crumbs)
 
             # Append to combined array
-            pts = np.array(mapped, dtype=np.float32)
+            pts = np.array(new_crumbs, dtype=np.float32)
             self._all_pts = np.vstack([self._all_pts, pts])
             self._dirty_count += len(mapped)
 
@@ -149,11 +139,6 @@ class CrumbStore:
         # Weighted sum: closer crumbs count more
         weights = 1.0 - dists[in_cone] / radius
         return float(np.sum(weights))
-
-    def local_to_map(self, drone_id: int, x: float, y: float) -> tuple[float, float]:
-        """Transform a local NED position to the shared map frame."""
-        ox, oy = self._offsets.get(drone_id, (0.0, 0.0))
-        return (x + ox, y + oy)
 
     def total_crumbs(self) -> int:
         """Total number of crumbs across all drones."""

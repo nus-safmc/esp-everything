@@ -1,11 +1,10 @@
 #include "odom.h"
 #include "at_detect.h"      /* camera_to_ned() */
-#include "mavlink_task.h"
+#include "mavlink_task.h"   /* mavlink_get_state() */
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 
 #include <string.h>
 
@@ -16,6 +15,16 @@ static const char *TAG = "odom";
  * --------------------------------------------------------------------------- */
 static nav_tag_t         s_nav_tags[ODOM_MAX_NAV_TAGS];
 static int               s_nav_tag_count = 0;
+
+/* map_T_odom: map_pos = odom_pos + s_offset_x/y
+ * Initialised to the drone's known start position (= start_offset from
+ * setup.yaml, sent by laptop).  Refined on every nav-tag sighting. */
+static float             s_offset_x = 0.0f;
+static float             s_offset_y = 0.0f;
+/* start_offset kept separately so drift can be expressed relative to it */
+static float             s_start_x  = 0.0f;
+static float             s_start_y  = 0.0f;
+
 static SemaphoreHandle_t s_mutex;
 
 /* ---------------------------------------------------------------------------
@@ -25,13 +34,30 @@ static SemaphoreHandle_t s_mutex;
 void odom_init(void)
 {
     s_nav_tag_count = 0;
+    s_offset_x = s_offset_y = 0.0f;
+    s_start_x  = s_start_y  = 0.0f;
     memset(s_nav_tags, 0, sizeof(s_nav_tags));
     s_mutex = xSemaphoreCreateMutex();
     configASSERT(s_mutex != NULL);
 }
 
 /* ---------------------------------------------------------------------------
- * Nav-tag table management
+ * Initial offset
+ * --------------------------------------------------------------------------- */
+
+void odom_set_initial_offset(float start_map_x, float start_map_y)
+{
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    s_start_x  = start_map_x;
+    s_start_y  = start_map_y;
+    s_offset_x = start_map_x;
+    s_offset_y = start_map_y;
+    xSemaphoreGive(s_mutex);
+    ESP_LOGI(TAG, "Initial map_T_odom set to (%.2f, %.2f)", start_map_x, start_map_y);
+}
+
+/* ---------------------------------------------------------------------------
+ * Nav-tag table
  * --------------------------------------------------------------------------- */
 
 void odom_set_nav_tags(const nav_tag_t *tags, int count)
@@ -45,10 +71,10 @@ void odom_set_nav_tags(const nav_tag_t *tags, int count)
     }
     xSemaphoreGive(s_mutex);
 
-    ESP_LOGI(TAG, "Nav-tag table updated (%d tags)", s_nav_tag_count);
+    ESP_LOGI(TAG, "Nav-tag table updated (%d tags, odom frame)", s_nav_tag_count);
     for (int i = 0; i < s_nav_tag_count; i++) {
-        ESP_LOGI(TAG, "  tag %d → map (%.2f, %.2f)",
-                 s_nav_tags[i].id, s_nav_tags[i].map_x, s_nav_tags[i].map_y);
+        ESP_LOGI(TAG, "  tag %d → odom (%.2f, %.2f)",
+                 s_nav_tags[i].id, s_nav_tags[i].x, s_nav_tags[i].y);
     }
 }
 
@@ -68,15 +94,14 @@ bool odom_find_nav_tag(int tag_id, nav_tag_t *out)
 }
 
 /* ---------------------------------------------------------------------------
- * Odometry correction
+ * Transform refinement on tag sighting
  *
- * Inverse transform:
- *   1. camera_to_ned() gives the NED offset (dn, de) from drone → tag
- *   2. drone_map = tag_known − (dn, de)
- *   3. Send VISION_POSITION_ESTIMATE to PX4 with the computed position
+ *   tag positions are in odom frame  (= map − start_offset, pre-computed
+ *   by laptop so the drone never needs to know the map positions directly)
  *
- * PX4's EKF2 fuses this with IMU to correct drift.  The map frame
- * effectively becomes PX4's local NED frame once the EKF converges.
+ *   inferred_odom = tag_odom − camera_to_ned_offset   (where I really am)
+ *   drift         = inferred_odom − PX4_odom          (accumulated error)
+ *   map_T_odom    = start_offset + drift              (updated transform)
  * --------------------------------------------------------------------------- */
 
 void odom_on_tag_seen(int tag_id, float tx, float ty, float tz, float heading)
@@ -84,25 +109,59 @@ void odom_on_tag_seen(int tag_id, float tx, float ty, float tz, float heading)
     nav_tag_t nav;
     if (!odom_find_nav_tag(tag_id, &nav)) return;
 
-    /* Compute NED offset from drone to tag */
+    /* NED offset from drone to tag in odom frame */
     float dn, de, hdist;
     camera_to_ned(tx, ty, tz, heading, &dn, &de, &hdist);
 
-    /* Inverse transform: drone position = tag position − offset */
-    float drone_map_x = nav.map_x - dn;
-    float drone_map_y = nav.map_y - de;
+    /* Inferred odom position from the tag measurement */
+    float inferred_odom_x = nav.x - dn;
+    float inferred_odom_y = nav.y - de;
 
-    /* Use PX4's current altitude estimate (barometer is reliable for Z) */
+    /* Current PX4 odom estimate */
     drone_state_t state = mavlink_get_state();
 
-    /* Send to PX4 EKF2 */
-    uint64_t usec = (uint64_t)esp_timer_get_time();
-    mavlink_send_vision_position(drone_map_x, drone_map_y, state.z, usec);
+    /* Drift = difference between measurement and PX4 estimate */
+    float drift_x = inferred_odom_x - state.x;
+    float drift_y = inferred_odom_y - state.y;
 
-    ESP_LOGI(TAG, "Odom correction: tag %d @ map(%.2f,%.2f) "
-                  "offset(%.2f,%.2f) → drone map(%.2f,%.2f) "
-                  "[px4 was (%.2f,%.2f)]",
-             tag_id, nav.map_x, nav.map_y,
-             dn, de, drone_map_x, drone_map_y,
-             state.x, state.y);
+    /* Refined map_T_odom = start_offset + accumulated drift */
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    float new_offset_x = s_start_x + drift_x;
+    float new_offset_y = s_start_y + drift_y;
+    s_offset_x = new_offset_x;
+    s_offset_y = new_offset_y;
+    xSemaphoreGive(s_mutex);
+
+    ESP_LOGI(TAG, "map_T_odom refined: tag %d  "
+                  "inferred_odom(%.2f,%.2f)  px4_odom(%.2f,%.2f)  "
+                  "drift(%.3f,%.3f)  new_offset(%.2f,%.2f)",
+             tag_id,
+             inferred_odom_x, inferred_odom_y,
+             state.x, state.y,
+             drift_x, drift_y,
+             new_offset_x, new_offset_y);
+}
+
+/* ---------------------------------------------------------------------------
+ * Frame conversion
+ * --------------------------------------------------------------------------- */
+
+void odom_to_map(float odom_x, float odom_y, float *map_x, float *map_y)
+{
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    float ox = s_offset_x;
+    float oy = s_offset_y;
+    xSemaphoreGive(s_mutex);
+    *map_x = odom_x + ox;
+    *map_y = odom_y + oy;
+}
+
+void map_to_odom(float map_x, float map_y, float *odom_x, float *odom_y)
+{
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    float ox = s_offset_x;
+    float oy = s_offset_y;
+    xSemaphoreGive(s_mutex);
+    *odom_x = map_x - ox;
+    *odom_y = map_y - oy;
 }

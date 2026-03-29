@@ -93,19 +93,24 @@ static void handle_command(const wifi_cmd_pkt_t *cmd)
     at_detect_set_known_tags(cmd->found_tag_ids, WIFI_MAX_FOUND_TAGS);
 
     switch (cmd->cmd_type) {
-    case CMD_GOTO:
-        ESP_LOGI(TAG, "CMD_GOTO (%.2f, %.2f)", cmd->goal_x, cmd->goal_y);
-        nav_set_goal_ned(cmd->goal_x, cmd->goal_y, -(WIFI_CRUISE_ALT_M));
-        break;
     case CMD_START:
         ESP_LOGI(TAG, "CMD_START");
         s_start_requested = true;
+    case CMD_GOTO: {
+        /* Goals arrive in map frame — convert to odom before passing to nav */
+        float odom_x, odom_y;
+        map_to_odom(cmd->goal_x, cmd->goal_y, &odom_x, &odom_y);
+        nav_set_goal_ned(cmd->goal_x, cmd->goal_y, -(WIFI_CRUISE_ALT_M));
+        ESP_LOGI(TAG, "CMD_GOTO map(%.2f,%.2f) → odom(%.2f,%.2f)",
+                 cmd->goal_x, cmd->goal_y, odom_x, odom_y);
         break;
+    }
     case CMD_LAND:
         ESP_LOGI(TAG, "CMD_LAND");
         s_land_requested = true;
         break;
     case CMD_HOLD:
+        nav_cancel();
         ESP_LOGI(TAG, "CMD_HOLD");
         nav_cancel();
         break;
@@ -118,28 +123,34 @@ static void handle_command(const wifi_cmd_pkt_t *cmd)
 /* Parse and apply a CMD_SET_NAV_TAGS packet */
 static void handle_nav_tags(const uint8_t *buf, int len)
 {
-    if (len < 3) return;
+    /* Header: pkt_type(1) + cmd_type(1) + tag_count(1) + start_x(4) + start_y(4) = 11 */
+    if (len < 11) return;
     uint8_t tag_count = buf[2];
     if (tag_count > WIFI_MAX_NAV_TAGS) tag_count = WIFI_MAX_NAV_TAGS;
 
-    int expected = 3 + tag_count * (int)sizeof(wifi_nav_tag_entry_t);
+    int expected = 11 + tag_count * (int)sizeof(wifi_nav_tag_entry_t);
     if (len < expected) {
         ESP_LOGW(TAG, "CMD_SET_NAV_TAGS truncated (%d < %d)", len, expected);
         return;
     }
 
-    /* Convert wire entries to odom nav_tag_t */
+    float start_map_x, start_map_y;
+    memcpy(&start_map_x, buf + 3, sizeof(float));
+    memcpy(&start_map_y, buf + 7, sizeof(float));
+    odom_set_initial_offset(start_map_x, start_map_y);
+
     const wifi_nav_tag_entry_t *entries =
-        (const wifi_nav_tag_entry_t *)(buf + 3);
+        (const wifi_nav_tag_entry_t *)(buf + 11);
 
     nav_tag_t tags[WIFI_MAX_NAV_TAGS];
     for (int i = 0; i < tag_count; i++) {
-        tags[i].id    = entries[i].id;
-        tags[i].map_x = entries[i].map_x;
-        tags[i].map_y = entries[i].map_y;
+        tags[i].id = entries[i].id;
+        tags[i].x  = entries[i].odom_x;
+        tags[i].y  = entries[i].odom_y;
     }
     odom_set_nav_tags(tags, tag_count);
-    ESP_LOGI(TAG, "CMD_SET_NAV_TAGS: %d tags received", tag_count);
+    ESP_LOGI(TAG, "CMD_SET_NAV_TAGS: %d tags, start map(%.2f,%.2f)",
+             tag_count, start_map_x, start_map_y);
 }
 
 /* ---------------------------------------------------------------------------
@@ -199,8 +210,8 @@ void wifi_task(void *arg)
         wifi_telem_pkt_t pkt = {};
         pkt.pkt_type    = WIFI_PKT_TELEM;
         pkt.drone_id    = CONFIG_DRONE_ID;
-        pkt.ned_x       = drone.x;
-        pkt.ned_y       = drone.y;
+        /* Report position in map frame so laptop works in a consistent frame */
+        odom_to_map(drone.x, drone.y, &pkt.ned_x, &pkt.ned_y);
         pkt.heading_rad = drone.heading;
         pkt.nav_state   = (uint8_t)ns.state;
         pkt.is_stuck    = (ns.state == NAV_STUCK) ? 1 : 0;
@@ -226,9 +237,15 @@ void wifi_task(void *arg)
         pkt.crumb_count     = (uint16_t)total_crumbs;
         pkt.crumb_last_sent = (last_sent < 0) ? 0xFFFF : (uint16_t)last_sent;
 
-        int n = crumb_read(next_to_send, pkt.crumb_batch, WIFI_MAX_CRUMBS_PKT);
+        /* Read crumbs (odom frame) and convert to map frame before sending */
+        crumb_t raw_crumbs[WIFI_MAX_CRUMBS_PKT];
+        int n = crumb_read(next_to_send, raw_crumbs, WIFI_MAX_CRUMBS_PKT);
         pkt.crumb_batch_start = (uint16_t)next_to_send;
         pkt.crumb_batch_count = (uint8_t)n;
+        for (int i = 0; i < n; i++) {
+            odom_to_map(raw_crumbs[i].x, raw_crumbs[i].y,
+                        &pkt.crumb_batch[i].x, &pkt.crumb_batch[i].y);
+        }
 
         /* ---- Send ---- */
         send(tx_sock, &pkt, sizeof(pkt), 0);
