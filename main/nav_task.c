@@ -48,6 +48,9 @@ static float wrap_pi(float a)
     return a - (float)M_PI;
 }
 
+/* Total collapsed scan points (shared by peer injection + collision avoidance) */
+#define COLLISION_SCAN_PTS    (TOF_SENSOR_COUNT * TOF_SENSOR_RESO)  /* 64         */
+
 /* ---------------------------------------------------------------------------
  * Inject peer drone positions as virtual obstacles into the collapsed scan.
  *
@@ -57,15 +60,16 @@ static float wrap_pi(float a)
  * weighting and growth step handle safety margins automatically.
  * --------------------------------------------------------------------------- */
 #define PEER_INJECT_RANGE_M   3.0f   /* ignore peers beyond this distance      */
-#define PEER_ANGULAR_RADIUS   3      /* inject into ±N scan bins around bearing */
+#define PEER_DENSITY_MAX      3.0f   /* density added at distance 0 (compare density_threshold=1.5) */
+#define PEER_BIN_SPREAD       2      /* inject into ±N VFH bins around bearing */
 
-static void inject_peers(tof_scan_collapsed_t *scan, float drone_x, float drone_y,
-                         float heading)
+static void inject_peers_into_histogram(float hist[VFH_BINS],
+                                        float drone_x, float drone_y,
+                                        float heading)
 {
     wifi_peer_list_t peers = wifi_get_peers();
 
     for (int p = 0; p < peers.count; p++) {
-        /* Convert peer from map frame to odom frame */
         float odom_x, odom_y;
         map_to_odom(peers.peers[p].map_x, peers.peers[p].map_y, &odom_x, &odom_y);
 
@@ -75,24 +79,24 @@ static void inject_peers(tof_scan_collapsed_t *scan, float drone_x, float drone_
 
         if (dist > PEER_INJECT_RANGE_M || dist < 0.01f) continue;
 
-        /* NED bearing to peer, then convert to body frame */
+        /* Density boost: strong when close, fades to zero at PEER_INJECT_RANGE_M */
+        float density = PEER_DENSITY_MAX * (1.0f - dist / PEER_INJECT_RANGE_M);
+
+        /* Body-frame bearing to peer */
         float ned_bearing  = atan2f(dy, dx);
         float body_bearing = ned_bearing - heading;
-        /* Normalise to [0, 2π) */
         body_bearing = fmodf(body_bearing, 2.0f * (float)M_PI);
         if (body_bearing < 0.0f) body_bearing += 2.0f * (float)M_PI;
 
-        /* Map to scan index (0 = front, CW, 64 bins) */
-        int center_idx = (int)(body_bearing * (float)COLLISION_SCAN_PTS
-                               / (2.0f * (float)M_PI));
-        center_idx %= COLLISION_SCAN_PTS;
+        /* Map to VFH bin and spread across ± PEER_BIN_SPREAD */
+        float bin_width_rad = 2.0f * (float)M_PI / (float)VFH_BINS;
+        int center_bin = (int)(body_bearing / bin_width_rad) % VFH_BINS;
 
-        /* Inject into center ± PEER_ANGULAR_RADIUS bins */
-        for (int d = -PEER_ANGULAR_RADIUS; d <= PEER_ANGULAR_RADIUS; d++) {
-            int idx = (center_idx + d + COLLISION_SCAN_PTS) % COLLISION_SCAN_PTS;
-            if (dist < scan->ranges[idx]) {
-                scan->ranges[idx] = dist;
-            }
+        for (int d = -PEER_BIN_SPREAD; d <= PEER_BIN_SPREAD; d++) {
+            int b = (center_bin + d + VFH_BINS) % VFH_BINS;
+            /* Taper: full density at center, half at the edges */
+            float taper = 1.0f - 0.5f * (float)abs(d) / (float)(PEER_BIN_SPREAD + 1);
+            hist[b] += density * taper;
         }
     }
 }
@@ -109,7 +113,6 @@ static void inject_peers(tof_scan_collapsed_t *scan, float drone_x, float drone_
 #define COLLISION_DANGER_M    0.32f   /* trigger threshold (m)                    */
 #define COLLISION_CLEAR_M     0.45f   /* resume normal nav once all points above  */
 #define COLLISION_SPEED_MS    0.6f    /* escape velocity magnitude (m/s)          */
-#define COLLISION_SCAN_PTS    (TOF_SENSOR_COUNT * TOF_SENSOR_RESO)  /* 64         */
 
 static bool s_collision_active = false;
 
@@ -229,12 +232,14 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
      * vfh_compute re-runs the histogram internally — acceptable at 10 Hz. */
     tof_scan_collapsed_t scan = tof_get_collapsed_scan();
 
-    /* Inject peer drones as virtual obstacles before VFH processing */
-    inject_peers(&scan, drone.x, drone.y, drone.heading);
-
     float hist[VFH_BINS];
     bool  blocked[VFH_BINS];
     vfh_get_histogram(&scan, vfh_cfg, hist, blocked);
+
+    /* Add soft repulsion from peer drones and re-threshold affected bins */
+    inject_peers_into_histogram(hist, drone.x, drone.y, drone.heading);
+    for (int b = 0; b < VFH_BINS; b++)
+        if (hist[b] >= vfh_cfg->density_threshold) blocked[b] = true;
 
     int free_count = 0;
     for (int b = 0; b < VFH_BINS; b++) if (!blocked[b]) free_count++;

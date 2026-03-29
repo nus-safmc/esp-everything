@@ -24,6 +24,7 @@ CMD_LAND          = 0x02   # land immediately
 CMD_HOLD          = 0x03   # hold position, cancel goal
 CMD_SET_NAV_TAGS  = 0x04   # send navigation tag map positions to drone
 CMD_START         = 0x05   # arm and take off
+CMD_SET_PEERS     = 0x06   # update nearby drone positions for inter-drone avoidance
 
 VFH_BINS    = 32
 MAX_CRUMBS_PKT = 10
@@ -185,4 +186,25 @@ def build_nav_tags_command(tags: list[NavTag],
         odom_x = t.map_x - start_x
         odom_y = t.map_y - start_y
         buf += struct.pack(_NAV_TAG_ENTRY_FMT, t.id, odom_x, odom_y)
+    return buf
+
+
+# ---------------------------------------------------------------------------
+# Peer drone positions packet  (laptop → drone)
+# ---------------------------------------------------------------------------
+
+MAX_PEERS = 7
+
+
+def build_peers_command(peers: list[tuple[float, float]]) -> bytes:
+    """
+    Build a CMD_SET_PEERS packet.
+
+    peers: list of (map_x, map_y) positions in map frame, up to MAX_PEERS.
+    Returns bytes ready to send over UDP.
+    """
+    count = min(len(peers), MAX_PEERS)
+    buf = struct.pack("<BBB", PKT_CMD, CMD_SET_PEERS, count)
+    for mx, my in peers[:count]:
+        buf += struct.pack("<ff", mx, my)
     return buf

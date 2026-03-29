@@ -29,7 +29,8 @@ import yaml
 
 from protocol import (
     TelemetryPacket, CommandPacket, NavTag,
-    parse_telemetry, build_command, build_nav_tags_command, MAX_FOUND_TAGS,
+    parse_telemetry, build_command, build_nav_tags_command,
+    build_peers_command, MAX_FOUND_TAGS,
 )
 
 log = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ log = logging.getLogger(__name__)
 TelemetryCallback = Callable[[TelemetryPacket, str], None]
 
 NAV_TAG_RESEND_INTERVAL = 20.0   # seconds between periodic re-broadcasts
+PEER_UPDATE_INTERVAL    = 0.2    # seconds between peer position broadcasts
 
 
 def _load_nav_tags(config_path: str) -> tuple[list[NavTag], dict[int, tuple[float, float]]]:
@@ -62,10 +64,12 @@ class CommsNode:
         self._sock: Optional[socket.socket] = None
         self._thread: Optional[threading.Thread] = None
         self._nav_tag_thread: Optional[threading.Thread] = None
+        self._peer_thread: Optional[threading.Thread] = None
         self._running = False
 
         self._callbacks: list[TelemetryCallback] = []
         self._drone_ips: dict[int, str] = {}
+        self._drone_positions: dict[int, tuple[float, float]] = {}  # map frame
         self._tag_registry: dict[int, int] = {}
         self._lock = threading.Lock()
 
@@ -96,6 +100,9 @@ class CommsNode:
         self._nav_tag_thread = threading.Thread(target=self._nav_tag_loop,
                                                 name="comms-navtag", daemon=True)
         self._nav_tag_thread.start()
+        self._peer_thread = threading.Thread(target=self._peer_broadcast_loop,
+                                             name="comms-peers", daemon=True)
+        self._peer_thread.start()
         log.info("CommsNode listening on UDP port %d", self._listen_port)
 
     def stop(self) -> None:
@@ -104,6 +111,8 @@ class CommsNode:
             self._thread.join(timeout=3.0)
         if self._nav_tag_thread:
             self._nav_tag_thread.join(timeout=3.0)
+        if self._peer_thread:
+            self._peer_thread.join(timeout=3.0)
         if self._sock:
             self._sock.close()
             self._sock = None
@@ -234,6 +243,7 @@ class CommsNode:
                 if pkt.drone_id not in self._drone_ips:
                     is_new_drone = True
                 self._drone_ips[pkt.drone_id] = src_ip
+                self._drone_positions[pkt.drone_id] = (pkt.ned_x, pkt.ned_y)
                 if pkt.tag_id >= 0 and pkt.tag_id not in self._tag_registry:
                     self._tag_registry[pkt.tag_id] = pkt.drone_id
                     log.info("Tag %d registered to drone %d",
@@ -266,6 +276,31 @@ class CommsNode:
                 for ip, data in targets:
                     self._send_bytes(ip, data)
                 log.debug("Nav tags re-broadcast to %d drone(s)", len(targets))
+
+    def _peer_broadcast_loop(self) -> None:
+        """Send each drone the positions of all other drones at 5 Hz."""
+        while self._running:
+            time.sleep(PEER_UPDATE_INTERVAL)
+            with self._lock:
+                drone_ids = list(self._drone_ips.keys())
+                ips       = dict(self._drone_ips)
+                positions = dict(self._drone_positions)
+
+            if len(drone_ids) < 2:
+                continue
+
+            for did in drone_ids:
+                ip = ips.get(did)
+                if ip is None:
+                    continue
+                # Collect positions of all OTHER drones
+                peers = [
+                    positions[other_id]
+                    for other_id in drone_ids
+                    if other_id != did and other_id in positions
+                ]
+                if peers:
+                    self._send_bytes(ip, build_peers_command(peers))
 
     def _send_bytes(self, ip: str, data: bytes) -> None:
         try:

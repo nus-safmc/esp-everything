@@ -18,21 +18,21 @@ drones:
     start_y: 0.0
   1:
     start_x: 0.0
-    start_y: 0.5
-  2:
-    start_x: 0.0
     start_y: 1.0
-  3:
-    start_x: 0.0
-    start_y: 1.5
+  # 2:
+  #   start_x: 0.0
+  #   start_y: 1.0
+  # 3:
+  #   start_x: 0.0
+  #   start_y: 1.5
 
 # Arena bounds (map frame, metres).
 # Goals are clamped inside this rectangle.
 arena:
-  min_x: -0.3
-  max_x: 2.1
-  min_y: -1.2
-  max_y: 2.0
+  min_x: -0.15
+  max_x: 2.5
+  min_y: -1.0
+  max_y: 3.0
 
 # Stuck detection and recovery
 stuck:
@@ -50,8 +50,8 @@ stuck:
 # IDs 0–11 are reserved for landing targets — do NOT add them here.
 # Survey these positions carefully — odometry accuracy depends on it.
 nav_tags:
-  10: {map_x: 1.0, map_y: -1.0}
-  11: {map_x: 2.0, map_y: -1.0}
+  10: {map_x: 1.0, map_y: -0.5}
+  11: {map_x: 2.0, map_y: 0.0}
   # 12: {map_x: 5.0, map_y: 0.0}
   # 13: {map_x: 1.0, map_y: 3.0}
   # 14: {map_x: 3.0, map_y: 3.0}
