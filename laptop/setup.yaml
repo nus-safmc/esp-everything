@@ -1,0 +1,33 @@
+# Drone fleet configuration
+# start_x / start_y: NED position where the drone powers on (arena frame, metres)
+# These offsets are added to each drone's local NED crumbs/positions to
+# transform them into the shared map frame.
+
+drones:
+  0:
+    start_x: 0.0
+    start_y: 0.0
+  1:
+    start_x: 0.0
+    start_y: 0.5
+  2:
+    start_x: 0.0
+    start_y: 1.0
+  3:
+    start_x: 0.0
+    start_y: 1.5
+
+# Unknown area bounds (map frame, metres).
+# Goals are clamped inside this rectangle.
+arena:
+  min_x: 0.0
+  max_x: 6.0
+  min_y: 0.0
+  max_y: 6.0
+
+# Exploration parameters
+exploration:
+  goal_distance: 2.0       # project goal this far ahead (m)
+  cone_radius: 2.0         # crumb density query radius (m)
+  cone_half_angle_deg: 30  # half-width of density query cone (deg)
+  min_gap_bins: 2          # ignore gaps narrower than this
