@@ -45,10 +45,14 @@ at_detect_pose_t at_detect_get_pose(void)
  * apriltag_pose camera frame (OpenCV): X=right, Y=down, Z=forward
  * Body frame:                          X=fwd,   Y=rgt,  Z=down
  *
- * R_cam_to_body (45° pitch-down):
- *   body_x =  cos45·tz − sin45·ty   (forward)
+ * The camera image is vertically flipped relative to the standard
+ * OpenCV convention (the sensor is mounted with Y inverted), so ty
+ * from estimate_tag_pose() has the opposite sign to the geometric
+ * derivation.  The corrected body-frame transform is therefore:
+ *
+ *   body_x =  cos45·tz + sin45·ty   (forward)  ← note + not −
  *   body_y =  tx                     (right)
- *   body_z =  cos45·ty + sin45·tz   (down — used for altitude sanity only)
+ *   body_z =  sin45·tz − cos45·ty   (down — unused)
  *
  * Mount offset: camera is CAM_FWD_OFFSET_M ahead of CoM. */
 #define CAM_PITCH_DEG       45.0f
@@ -64,10 +68,10 @@ void camera_to_ned(float tx, float ty, float tz,
     const float cp    = cosf(pitch);   /* cos 45° = 0.7071 */
     const float sp    = sinf(pitch);   /* sin 45° = 0.7071 */
 
-    /* Camera frame → body frame */
-    float body_x = cp * tz - sp * ty + CAM_FWD_OFFSET_M;   /* forward */
+    /* Camera frame → body frame (ty sign inverted due to flipped image) */
+    float body_x = cp * tz + sp * ty + CAM_FWD_OFFSET_M;   /* forward */
     float body_y = tx;                                        /* right   */
-    /* float body_z = cp*ty + sp*tz; */    /* down — tag altitude, not needed yet */
+    /* float body_z = sp * tz - cp * ty; */   /* down — not needed yet */
 
     /* Horizontal distance from drone centre to tag (frame-invariant) */
     *out_hdist = sqrtf(body_x * body_x + body_y * body_y);
