@@ -23,21 +23,11 @@ static const char *TAG = "nav";
  * Internal state
  * --------------------------------------------------------------------------- */
 typedef struct {
-    float ned_bearing_rad;      /* NED bearing to avoid                         */
-    uint32_t expiry_ms;         /* timestamp when this entry expires            */
-} forbidden_entry_t;
-
-typedef struct {
     nav_state_t state;
     float goal_x, goal_y, goal_z;
     bool  has_goal;
     float prev_steering_rad;    /* VFH prev input for continuity                */
-    uint32_t stuck_since_ms;    /* timestamp when STUCK was entered             */
     uint32_t stuck_count;       /* lifetime stuck events                        */
-    float retreat_bearing_rad;  /* NED bearing to retreat along (opposite goal) */
-    uint32_t retreat_start_ms;  /* when retreat began                           */
-    forbidden_entry_t forbidden[NAV_MAX_FORBIDDEN];
-    int forbidden_count;
 } nav_internal_t;
 
 static nav_internal_t    s_nav;
@@ -54,46 +44,6 @@ static float wrap_pi(float a)
     a = fmodf(a + (float)M_PI, 2.0f * (float)M_PI);
     if (a < 0.0f) a += 2.0f * (float)M_PI;
     return a - (float)M_PI;
-}
-
-/* Add a forbidden NED bearing (oldest entry evicted if full) */
-static void add_forbidden(nav_internal_t *n, float ned_bearing_rad, uint32_t now_ms)
-{
-    /* Expire stale entries first */
-    for (int i = 0; i < n->forbidden_count; ) {
-        if (now_ms >= n->forbidden[i].expiry_ms) {
-            n->forbidden[i] = n->forbidden[--n->forbidden_count];
-        } else {
-            i++;
-        }
-    }
-    /* Evict oldest if full */
-    if (n->forbidden_count >= NAV_MAX_FORBIDDEN) {
-        n->forbidden[0] = n->forbidden[--n->forbidden_count];
-    }
-    n->forbidden[n->forbidden_count++] = (forbidden_entry_t){
-        .ned_bearing_rad = ned_bearing_rad,
-        .expiry_ms       = now_ms + NAV_FORBIDDEN_TTL_MS,
-    };
-}
-
-/* Build extra_blocked array from forbidden bearings in body frame */
-static void build_forbidden_blocked(const nav_internal_t *n, float heading,
-                                    uint32_t now_ms, bool out[VFH_BINS])
-{
-    memset(out, 0, VFH_BINS * sizeof(bool));
-    for (int i = 0; i < n->forbidden_count; i++) {
-        if (now_ms >= n->forbidden[i].expiry_ms) continue;
-        /* Convert NED bearing to body-frame angle, then to bin index */
-        float body_angle = wrap_pi(n->forbidden[i].ned_bearing_rad - heading);
-        /* body_angle in (-π,π] → degrees in [0,360) */
-        float deg = body_angle * 180.0f / (float)M_PI;
-        if (deg < 0.0f) deg += 360.0f;
-        int center_bin = (int)(deg / (360.0f / VFH_BINS)) % VFH_BINS;
-        for (int d = -NAV_FORBIDDEN_HALF_W; d <= NAV_FORBIDDEN_HALF_W; d++) {
-            out[(center_bin + d + VFH_BINS) % VFH_BINS] = true;
-        }
-    }
 }
 
 /* ---------------------------------------------------------------------------
@@ -164,77 +114,25 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
     float goal_body_angle = wrap_pi(goal_ned_angle - drone.heading);
 
     /* ---- Compute updated state ---- */
-    nav_state_t new_state          = nav.state;
-    float       new_steering       = nav.prev_steering_rad;
-    uint32_t    new_stuck_count    = nav.stuck_count;
-    uint32_t    new_stuck_since_ms = nav.stuck_since_ms;
-
-    /* Build forbidden-zone overlay for VFH */
-    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
-    bool extra_blocked[VFH_BINS];
-    build_forbidden_blocked(&nav, drone.heading, now_ms, extra_blocked);
-
-    /* Count free bins with forbidden zones applied */
-    int effective_free = 0;
-    for (int b = 0; b < VFH_BINS; b++)
-        if (!blocked[b] && !extra_blocked[b]) effective_free++;
+    nav_state_t new_state       = nav.state;
+    float       new_steering    = nav.prev_steering_rad;
+    uint32_t    new_stuck_count = nav.stuck_count;
 
     if (nav.state == NAV_STUCK) {
-        /* STUCK: hold position, wait, then start retreating */
-        if ((now_ms - nav.stuck_since_ms) >= NAV_STUCK_HOLD_MS) {
-            /* Retreat direction = opposite of goal bearing */
-            float retreat_brg = wrap_pi(goal_ned_angle + (float)M_PI);
-            add_forbidden(&nav, goal_ned_angle, now_ms);
-            ESP_LOGI(TAG, "Retreating away from goal bearing (%.0f°)",
-                     goal_ned_angle * 180.0f / (float)M_PI);
-            new_state = NAV_RETREATING;
-            new_steering = 0.0f;
-
-            xSemaphoreTake(s_mutex, portMAX_DELAY);
-            s_nav.retreat_bearing_rad = retreat_brg;
-            s_nav.retreat_start_ms    = now_ms;
-            /* Copy forbidden array back */
-            memcpy(s_nav.forbidden, nav.forbidden, sizeof(nav.forbidden));
-            s_nav.forbidden_count = nav.forbidden_count;
-            xSemaphoreGive(s_mutex);
-
-            /* Start backing up */
-            float tx = drone.x + NAV_RETREAT_STEP_M * cosf(retreat_brg);
-            float ty = drone.y + NAV_RETREAT_STEP_M * sinf(retreat_brg);
-            mavlink_set_position_ned(tx, ty, nav.goal_z, retreat_brg);
-        }
-
-    } else if (nav.state == NAV_RETREATING) {
-        /* Back up incrementally until VFH finds viable directions */
-        bool timed_out = (now_ms - nav.retreat_start_ms) >= NAV_RETREAT_MAX_MS;
-
-        if (effective_free >= NAV_STUCK_MIN_FREE || timed_out) {
-            if (timed_out) {
-                ESP_LOGW(TAG, "Retreat timed out — resuming with %d free bins", effective_free);
-            } else {
-                ESP_LOGI(TAG, "Path found (%d free bins) — resuming goal", effective_free);
-            }
-            new_state    = NAV_ROTATING;
-            new_steering = 0.0f;
-        } else {
-            /* Keep backing up */
-            float tx = drone.x + NAV_RETREAT_STEP_M * cosf(nav.retreat_bearing_rad);
-            float ty = drone.y + NAV_RETREAT_STEP_M * sinf(nav.retreat_bearing_rad);
-            mavlink_set_position_ned(tx, ty, nav.goal_z, nav.retreat_bearing_rad);
-        }
+        /* Hold position — laptop stuck monitor will send a new goal */
+        mavlink_set_hold();
 
     } else if (free_count == 0) {
-        /* All VFH bins blocked — declare stuck */
+        /* All VFH bins blocked — hold and signal stuck to laptop */
         mavlink_set_hold();
-        new_state          = NAV_STUCK;
-        new_stuck_since_ms = now_ms;
-        new_stuck_count    = nav.stuck_count + 1;
+        new_state       = NAV_STUCK;
+        new_stuck_count = nav.stuck_count + 1;
         ESP_LOGW(TAG, "STUCK — all directions blocked (event #%lu)", (unsigned long)new_stuck_count);
 
     } else {
-        /* Normal navigation: get VFH steering with forbidden zones */
+        /* Normal navigation */
         float steering = vfh_compute(&scan, vfh_cfg, goal_body_angle,
-                                     nav.prev_steering_rad, extra_blocked);
+                                     nav.prev_steering_rad, NULL);
         new_steering = steering;
 
         /* |steering| is the heading error: how much we must rotate before flying.
@@ -278,22 +176,21 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
 
     /* Write back under mutex */
     xSemaphoreTake(s_mutex, portMAX_DELAY);
-    s_nav.state            = new_state;
+    s_nav.state             = new_state;
     s_nav.prev_steering_rad = new_steering;
-    s_nav.stuck_count      = new_stuck_count;
-    s_nav.stuck_since_ms   = new_stuck_since_ms;
+    s_nav.stuck_count       = new_stuck_count;
 
-    s_status.state            = new_state;
-    s_status.goal_x           = nav.goal_x;
-    s_status.goal_y           = nav.goal_y;
-    s_status.goal_z           = nav.goal_z;
-    s_status.dist_to_goal     = dist;
+    s_status.state             = new_state;
+    s_status.goal_x            = nav.goal_x;
+    s_status.goal_y            = nav.goal_y;
+    s_status.goal_z            = nav.goal_z;
+    s_status.dist_to_goal      = dist;
     s_status.heading_error_rad = wrap_pi(goal_ned_angle - drone.heading);
     s_status.vfh_steering_rad  = new_steering;
     s_status.free_bins         = free_count;
     s_status.stuck_count       = new_stuck_count;
     for (int b = 0; b < VFH_BINS; b++)
-        s_status.vfh_blocked[b] = blocked[b] || extra_blocked[b];
+        s_status.vfh_blocked[b] = blocked[b];
     xSemaphoreGive(s_mutex);
 }
 
@@ -321,7 +218,6 @@ void nav_set_goal_ned(float gx, float gy, float gz)
     s_nav.has_goal        = true;
     s_nav.state           = NAV_ROTATING;
     s_nav.prev_steering_rad = 0.0f;
-    s_nav.forbidden_count = 0;
     xSemaphoreGive(s_mutex);
 
     /* Issue hold before nav_task takes over, so PX4 freezes in place

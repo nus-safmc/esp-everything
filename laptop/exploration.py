@@ -100,6 +100,7 @@ class ExplorationDirector:
         map_y: float,
         heading_rad: float,
         vfh_blocked: list[bool],
+        stuck_zones: list[tuple[float, float, float]] | None = None,
     ) -> tuple[float, float] | None:
         """
         Pick the least-explored navigable direction and return a goal
@@ -112,7 +113,7 @@ class ExplorationDirector:
             return None
 
         best_bearing = None
-        best_density = float("inf")
+        best_score   = float("inf")
 
         for center_bin, width in gaps:
             if width < self._min_gap_bins:
@@ -120,7 +121,6 @@ class ExplorationDirector:
 
             # Body-frame angle of gap centre (CW from forward, radians)
             body_rad = (center_bin + 0.5) * _BIN_WIDTH_RAD
-            # Convert to map bearing
             map_bearing = heading_rad + body_rad
 
             density = self._store.cone_density(
@@ -130,18 +130,26 @@ class ExplorationDirector:
                 half_angle_rad=self._cone_half_angle,
             )
 
-            if density < best_density:
-                best_density = density
+            # Add penalty for goals inside stuck zones
+            stuck_penalty = 0.0
+            if stuck_zones:
+                gx = map_x + self._goal_dist * math.cos(map_bearing)
+                gy = map_y + self._goal_dist * math.sin(map_bearing)
+                for zx, zy, zr in stuck_zones:
+                    if math.hypot(gx - zx, gy - zy) < zr:
+                        stuck_penalty = 1e6   # effectively block this direction
+                        break
+
+            score = density + stuck_penalty
+            if score < best_score:
+                best_score   = score
                 best_bearing = map_bearing
 
         if best_bearing is None:
             return None
 
-        # Project goal forward
         gx = map_x + self._goal_dist * math.cos(best_bearing)
         gy = map_y + self._goal_dist * math.sin(best_bearing)
-
-        # Clamp within arena bounds
         gx = max(self._min_x, min(self._max_x, gx))
         gy = max(self._min_y, min(self._max_y, gy))
 

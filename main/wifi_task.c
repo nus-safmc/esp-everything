@@ -159,7 +159,7 @@ void wifi_task(void *arg)
         pkt.ned_y       = drone.y;
         pkt.heading_rad = drone.heading;
         pkt.nav_state   = (uint8_t)ns.state;
-        pkt.is_stuck    = (ns.state == NAV_STUCK || ns.state == NAV_RETREATING) ? 1 : 0;
+        pkt.is_stuck    = (ns.state == NAV_STUCK) ? 1 : 0;
 
         /* AprilTag — always send the latched tag ID (−1 if none found yet).
          * tag_dist_m comes from live pose when available. */

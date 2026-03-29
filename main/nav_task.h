@@ -24,13 +24,7 @@
 #define NAV_CRUISE_SPEED_MS     0.5f    /* forward cruise speed (m/s)            */
 #define NAV_YAW_TOL_RAD         0.10f   /* ±6° heading tolerance before flying   */
 #define NAV_ARRIVE_RADIUS_M     0.25f   /* XY goal-reached radius (m)            */
-#define NAV_STUCK_HOLD_MS       2000    /* hold duration in STUCK before retreat  */
-#define NAV_STUCK_MIN_FREE      2       /* min free bins to exit retreat          */
-#define NAV_RETREAT_STEP_M      0.5f    /* position step per tick while backing up */
-#define NAV_RETREAT_MAX_MS      10000   /* max retreat duration before giving up  */
-#define NAV_FORBIDDEN_TTL_MS    15000   /* how long a virtual obstacle persists   */
-#define NAV_FORBIDDEN_HALF_W    3       /* ±bins around forbidden bearing         */
-#define NAV_MAX_FORBIDDEN       4       /* max simultaneous forbidden bearings    */
+#define NAV_STUCK_HOLD_MS       2000    /* hold duration before declaring stuck   */
 
 /* ---------------------------------------------------------------------------
  * Navigator states
@@ -40,8 +34,7 @@ typedef enum {
     NAV_ROTATING,       /* spinning in place to face VFH-selected direction      */
     NAV_FLYING,         /* aligned — flying forward at cruise speed              */
     NAV_ARRIVED,        /* within arrival radius — goal reached, hold commanded  */
-    NAV_STUCK,          /* VFH fully blocked — holding, will retry after delay   */
-    NAV_RETREATING,     /* backing up to escape dead-end before retrying goal    */
+    NAV_STUCK,          /* VFH fully blocked — holding, awaiting laptop rescue   */
 } nav_state_t;
 
 /* ---------------------------------------------------------------------------

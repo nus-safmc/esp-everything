@@ -25,6 +25,14 @@ arena:
   min_y: 0.0
   max_y: 6.0
 
+# Stuck detection and recovery
+stuck:
+  progress_threshold_m: 0.3   # movement less than this = no progress
+  stuck_timeout_s:       5.0   # no progress for this long = stuck
+  stuck_zone_radius:     0.5   # radius of no-go zone marked at stuck location
+  stuck_zone_ttl_s:     60.0   # how long stuck zones persist
+  retreat_dist_m:        1.5   # fallback retreat distance when fully blocked
+
 # Exploration parameters
 exploration:
   goal_distance: 2.0       # project goal this far ahead (m)
