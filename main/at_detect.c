@@ -165,16 +165,37 @@ static esp_err_t init_camera(void)
 
 #define LOOP_DELAY_MS 100
 
-static volatile bool s_land_requested = false;
-static volatile int  s_last_tag_id = -1;
+static volatile bool  s_land_requested = false;
+static volatile int   s_last_tag_id = -1;
+static volatile int8_t s_my_tag_id  = -1;   /* latched: set once, never overwritten */
+
+static int8_t            s_known_tags[AT_MAX_KNOWN_TAGS];
+static int               s_known_count = 0;
+static SemaphoreHandle_t s_known_mutex;
+
+/* Is this tag ID already found by the fleet? */
+static bool tag_is_known(int id)
+{
+    bool found = false;
+    xSemaphoreTake(s_known_mutex, portMAX_DELAY);
+    for (int i = 0; i < s_known_count; i++) {
+        if (s_known_tags[i] == (int8_t)id) { found = true; break; }
+    }
+    xSemaphoreGive(s_known_mutex);
+    return found;
+}
 
 void at_detect_init(void)
 {
     s_land_requested = false;
     s_last_tag_id    = -1;
+    s_my_tag_id      = -1;
+    s_known_count    = 0;
     memset(&s_pose, 0, sizeof(s_pose));
-    s_pose_mutex = xSemaphoreCreateMutex();
+    s_pose_mutex  = xSemaphoreCreateMutex();
+    s_known_mutex = xSemaphoreCreateMutex();
     configASSERT(s_pose_mutex != NULL);
+    configASSERT(s_known_mutex != NULL);
 }
 
 bool at_detect_land_requested(void)
@@ -190,6 +211,21 @@ void at_detect_clear_land_request(void)
 int at_detect_last_id(void)
 {
   return s_last_tag_id;
+}
+
+int8_t at_detect_my_tag_id(void)
+{
+    return s_my_tag_id;
+}
+
+void at_detect_set_known_tags(const int8_t *ids, int count)
+{
+    xSemaphoreTake(s_known_mutex, portMAX_DELAY);
+    s_known_count = 0;
+    for (int i = 0; i < count && s_known_count < AT_MAX_KNOWN_TAGS; i++) {
+        if (ids[i] >= 0) s_known_tags[s_known_count++] = ids[i];
+    }
+    xSemaphoreGive(s_known_mutex);
 }
 
 void print_img(image_u8_t* im) {
@@ -293,6 +329,13 @@ void at_detect_task(void* pvParams)
 
           if (det->hamming > 1 || det->decision_margin <= 40.0) continue;
 
+          /* Skip tags the fleet already found (unless it's our own) */
+          if (s_my_tag_id >= 0 && det->id != s_my_tag_id) continue;
+          if (s_my_tag_id < 0 && tag_is_known(det->id)) {
+              ESP_LOGI(TAG, "Tag %d already known — ignoring", det->id);
+              continue;
+          }
+
           ESP_LOGI(TAG, "Apriltag found! ID=%d, DM=%f, hamming=%d", det->id, det->decision_margin, det->hamming);
           s_last_tag_id = det->id;
 
@@ -317,6 +360,7 @@ void at_detect_task(void* pvParams)
             xSemaphoreGive(s_pose_mutex);
 
             if (!s_land_requested) {
+              s_my_tag_id = (int8_t)det->id;
               s_land_requested = true;
               ESP_LOGW(TAG, "Land request raised (id=%d err=%.3f "
                   "t=[%.2f,%.2f,%.2f])",

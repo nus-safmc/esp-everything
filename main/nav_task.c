@@ -292,6 +292,8 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
     s_status.vfh_steering_rad  = new_steering;
     s_status.free_bins         = free_count;
     s_status.stuck_count       = new_stuck_count;
+    for (int b = 0; b < VFH_BINS; b++)
+        s_status.vfh_blocked[b] = blocked[b] || extra_blocked[b];
     xSemaphoreGive(s_mutex);
 }
 

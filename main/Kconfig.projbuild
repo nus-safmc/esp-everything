@@ -61,6 +61,20 @@ menu "Drone Configuration"
         help
           Port to send apriltag messages to
 
+    config DRONE_ID
+        int "Drone ID (0-3)"
+        range 0 3
+        default 0
+        help
+          Unique identifier for this drone. Used in telemetry packets.
+
+    config TELEM_PORT
+        int "Telemetry UDP port (outgoing)"
+        range 0 65535
+        default 5005
+        help
+          UDP port on the laptop that receives telemetry packets.
+
     config TOF_FRONT_SENSOR_IDX
         int "Front-facing ToF sensor index (0-7)"
         range 0 7

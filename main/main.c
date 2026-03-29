@@ -2,10 +2,12 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "nvs_flash.h"
 #include "mavlink_task.h"
 #include "tof_task.h"
 #include "nav_task.h"
 #include "at_detect.h"
+#include "wifi_task.h"
 
 #include <math.h>
 
@@ -267,13 +269,22 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "ESP starting");
 
+    /* NVS must be init before WiFi */
+    esp_err_t nvs_err = nvs_flash_init();
+    if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        nvs_err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(nvs_err);
+
     /* Init all modules before spawning tasks */
     mavlink_task_init();
     tof_task_init();
     nav_task_init();
     at_detect_init();
+    wifi_task_init();   /* blocks until IP obtained */
 
-    /* Core 0: hardware-facing tasks */
+    /* Core 0: hardware-facing tasks + WiFi telemetry */
     xTaskCreatePinnedToCore(
         mavlink_task, "mav", MAV_TASK_STACK,
         NULL, MAV_TASK_PRIORITY, NULL, MAV_TASK_CORE
@@ -281,6 +292,10 @@ void app_main(void)
     xTaskCreatePinnedToCore(
         tof_task, "tof", TOF_TASK_STACK,
         NULL, TOF_TASK_PRIORITY, NULL, TOF_TASK_CORE
+    );
+    xTaskCreatePinnedToCore(
+        wifi_task, "wifi", WIFI_TASK_STACK,
+        NULL, WIFI_TASK_PRIORITY, NULL, WIFI_TASK_CORE
     );
 
     /* Core 1: navigator (Pri 3) + mission (Pri 2)

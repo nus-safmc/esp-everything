@@ -7,6 +7,7 @@ idf_component_register(
         "nav_task.c"
         "at_detect.c"
         "breadcrumb.c"
+        "wifi_task.c"
     INCLUDE_DIRS "."
     REQUIRES
         mavlink
@@ -17,6 +18,10 @@ idf_component_register(
         esp-apriltag
         esp32-camera
         nvs_flash
+        esp_wifi
+        esp_netif
+        esp_event
+        lwip
 )
 
 # Suppress -Waddress-of-packed-member from MAVLink and VL53L5CX generated headers

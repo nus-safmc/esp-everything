@@ -57,6 +57,7 @@ typedef struct {
     float       vfh_steering_rad;    /* last VFH steering output, body frame     */
     int         free_bins;           /* free VFH bins last cycle                 */
     uint32_t    stuck_count;         /* lifetime stuck events                    */
+    bool        vfh_blocked[VFH_BINS]; /* per-bin blocked state (grown + forbidden) */
 } nav_status_t;
 
 /* ---------------------------------------------------------------------------
