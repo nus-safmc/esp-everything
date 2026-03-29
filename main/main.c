@@ -156,7 +156,10 @@ precision_landing:
     vTaskDelay(pdMS_TO_TICKS(200));
 
     {
-        /* Compute tag odom position from the single detection */
+        /* Compute tag odom position from the detection-time snapshot.
+         * pose.drone_x/y/heading are captured at the moment the tag was
+         * detected, so the camera-to-NED offset is applied to the correct
+         * drone position, not the (potentially different) current one. */
         at_detect_pose_t pose  = at_detect_get_pose();
         drone_state_t    drone = mavlink_get_state();
 
@@ -165,9 +168,10 @@ precision_landing:
 
         if (pose.valid) {
             float dn, de, hdist;
-            camera_to_ned(pose.tx, pose.ty, pose.tz, drone.heading, &dn, &de, &hdist);
-            tag_x = drone.x + dn;
-            tag_y = drone.y + de;
+            camera_to_ned(pose.tx, pose.ty, pose.tz, pose.drone_heading,
+                          &dn, &de, &hdist);
+            tag_x = pose.drone_x + dn;
+            tag_y = pose.drone_y + de;
             ESP_LOGI(TAG, "Tag at odom (%.2f, %.2f), hdist=%.2f m", tag_x, tag_y, hdist);
         } else {
             ESP_LOGW(TAG, "No valid pose — landing in place");
@@ -176,7 +180,7 @@ precision_landing:
         /* Fly to the tag position using nav_task (VFH+ obstacle avoidance) */
         nav_set_goal_ned(tag_x, tag_y, target_z);
 
-        for (int i = 0; i < PRECISION_APPROACH_S * 10; i++) {
+        for (;;) {
             nav_state_t ns = nav_get_status().state;
             if (ns == NAV_ARRIVED) {
                 ESP_LOGI(TAG, "Above tag — landing");

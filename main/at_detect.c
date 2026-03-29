@@ -387,12 +387,16 @@ void at_detect_task(void* pvParams)
 
           /* Only trust estimates with low reprojection error */
           if (err < 0.5) {
+            drone_state_t det_drone = mavlink_get_state();
             xSemaphoreTake(s_pose_mutex, portMAX_DELAY);
             s_pose.tx    = (float)MATD_EL(pose.t, 0, 0);
             s_pose.ty    = (float)MATD_EL(pose.t, 1, 0);
             s_pose.tz    = (float)MATD_EL(pose.t, 2, 0);
             s_pose.valid = true;
             s_pose.tag_id = det->id;
+            s_pose.drone_x = det_drone.x;
+            s_pose.drone_y = det_drone.y;
+            s_pose.drone_heading = det_drone.heading;
             xSemaphoreGive(s_pose_mutex);
 
             if (!s_land_requested) {

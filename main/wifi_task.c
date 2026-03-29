@@ -119,7 +119,6 @@ static void handle_command(const wifi_cmd_pkt_t *cmd)
     case CMD_HOLD:
         nav_cancel();
         ESP_LOGI(TAG, "CMD_HOLD");
-        nav_cancel();
         break;
     default:
         ESP_LOGW(TAG, "Unknown cmd type 0x%02x", cmd->cmd_type);
