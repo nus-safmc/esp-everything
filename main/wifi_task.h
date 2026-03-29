@@ -75,15 +75,17 @@ typedef struct __attribute__((packed)) {
 #define WIFI_MAX_NAV_TAGS   16
 
 typedef struct __attribute__((packed)) {
-    int8_t   id;            /* AprilTag ID                                  */
-    float    map_x;         /* NED north in map frame (m)                   */
-    float    map_y;         /* NED east  in map frame (m)                   */
+    int8_t   id;
+    float    odom_x;    /* NED north in drone odom frame (m) = map_x − start_x */
+    float    odom_y;    /* NED east  in drone odom frame (m) = map_y − start_y */
 } wifi_nav_tag_entry_t;
 
 typedef struct __attribute__((packed)) {
-    uint8_t  pkt_type;      /* WIFI_PKT_CMD                                */
-    uint8_t  cmd_type;      /* CMD_SET_NAV_TAGS                            */
-    uint8_t  tag_count;     /* number of valid entries (≤ WIFI_MAX_NAV_TAGS)*/
+    uint8_t  pkt_type;      /* WIFI_PKT_CMD                                         */
+    uint8_t  cmd_type;      /* CMD_SET_NAV_TAGS                                     */
+    uint8_t  tag_count;     /* number of valid entries (≤ WIFI_MAX_NAV_TAGS)        */
+    float    start_map_x;   /* this drone's start position in map frame (NED north) */
+    float    start_map_y;   /* this drone's start position in map frame (NED east)  */
     wifi_nav_tag_entry_t tags[WIFI_MAX_NAV_TAGS];
 } wifi_nav_tags_pkt_t;
 

@@ -84,6 +84,18 @@ def load_nav_tags(config_path: str = "setup.yaml") -> list[NavTag]:
     return tags
 
 
+def load_drone_starts(config_path: str = "setup.yaml") -> dict[int, tuple[float, float]]:
+    """Load per-drone start positions (map frame) from setup.yaml.
+
+    Returns {drone_id: (start_x, start_y)}.
+    """
+    cfg = yaml.safe_load(Path(config_path).read_text())
+    return {
+        int(did): (props["start_x"], props["start_y"])
+        for did, props in cfg.get("drones", {}).items()
+    }
+
+
 class ExplorationDirector:
     def __init__(self, crumb_store: CrumbStore, config_path: str = "setup.yaml"):
         cfg = yaml.safe_load(Path(config_path).read_text())

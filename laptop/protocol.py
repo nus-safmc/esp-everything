@@ -163,15 +163,25 @@ class NavTag:
     map_y: float    # NED east  in map frame (m)
 
 
-def build_nav_tags_command(tags: list[NavTag]) -> bytes:
+def build_nav_tags_command(tags: list[NavTag],
+                           start_x: float = 0.0,
+                           start_y: float = 0.0) -> bytes:
     """
-    Build a CMD_SET_NAV_TAGS packet.
+    Build a CMD_SET_NAV_TAGS packet for one specific drone.
 
-    tags: list of NavTag (up to MAX_NAV_TAGS).
-    Returns bytes ready to send over UDP.
+    tags:    list of NavTag in map frame (up to MAX_NAV_TAGS).
+    start_x: drone's start position in map frame (NED north, m).
+    start_y: drone's start position in map frame (NED east,  m).
+
+    Tag positions are pre-converted to the drone's odom frame
+    (map_pos − start_offset) so the drone never needs to know the
+    map frame directly.
     """
     count = min(len(tags), MAX_NAV_TAGS)
-    buf = struct.pack("<BBB", PKT_CMD, CMD_SET_NAV_TAGS, count)
+    # Header: pkt_type, cmd_type, count, start_map_x, start_map_y
+    buf = struct.pack("<BBBff", PKT_CMD, CMD_SET_NAV_TAGS, count, start_x, start_y)
     for t in tags[:count]:
-        buf += struct.pack(_NAV_TAG_ENTRY_FMT, t.id, t.map_x, t.map_y)
+        odom_x = t.map_x - start_x
+        odom_y = t.map_y - start_y
+        buf += struct.pack(_NAV_TAG_ENTRY_FMT, t.id, odom_x, odom_y)
     return buf
