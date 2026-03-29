@@ -50,13 +50,15 @@ stuck:
 # IDs 0–11 are reserved for landing targets — do NOT add them here.
 # Survey these positions carefully — odometry accuracy depends on it.
 nav_tags:
-  12: {map_x: 5.0, map_y: 0.0}
-  13: {map_x: 1.0, map_y: 3.0}
-  14: {map_x: 3.0, map_y: 3.0}
-  15: {map_x: 5.0, map_y: 3.0}
-  16: {map_x: 1.0, map_y: 6.0}
-  17: {map_x: 3.0, map_y: 6.0}
-  18: {map_x: 5.0, map_y: 6.0}
+  10: {map_x: 1.0, map_y: -1.0}
+  11: {map_x: 2.0, map_y: -1.0}
+  # 12: {map_x: 5.0, map_y: 0.0}
+  # 13: {map_x: 1.0, map_y: 3.0}
+  # 14: {map_x: 3.0, map_y: 3.0}
+  # 15: {map_x: 5.0, map_y: 3.0}
+  # 16: {map_x: 1.0, map_y: 6.0}
+  # 17: {map_x: 3.0, map_y: 6.0}
+  # 18: {map_x: 5.0, map_y: 6.0}
 # Exploration parameters
 exploration:
   goal_distance: 2.0       # project goal this far ahead (m)

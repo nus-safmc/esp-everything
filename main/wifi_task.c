@@ -96,6 +96,7 @@ static void handle_command(const wifi_cmd_pkt_t *cmd)
     case CMD_START:
         ESP_LOGI(TAG, "CMD_START");
         s_start_requested = true;
+        break;
     case CMD_GOTO: {
         /* Goals arrive in map frame — convert to odom before passing to nav */
         float odom_x, odom_y;

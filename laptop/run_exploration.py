@@ -20,7 +20,7 @@ import time
 
 from comms import CommsNode
 from crumb_store import CrumbStore
-from exploration import ExplorationDirector, load_nav_tags
+from exploration import ExplorationDirector
 from protocol import (
     CMD_GOTO, CMD_LAND, CMD_START, CommandPacket,
     NAV_IDLE, NAV_ARRIVED, NAV_STUCK,
@@ -46,15 +46,15 @@ def main():
     drone_id = args.drone_id
 
     # --- Initialise components ---
-    store    = CrumbStore(args.config)
+    store    = CrumbStore()
     director = ExplorationDirector(store, args.config)
-    comms    = CommsNode(listen_port=args.telem_port, cmd_port=args.cmd_port)
-    comms.set_nav_tags(load_nav_tags(args.config))
+    comms    = CommsNode(listen_port=args.telem_port, cmd_port=args.cmd_port,
+                         config_path=args.config)
 
     goal_count    = 0
     last_log_time = 0.0
     last_goal_time = 0.0
-    GOAL_INTERVAL  = 2.0   # seconds between exploration goal updates
+    GOAL_INTERVAL  = 0.5   # seconds between exploration goal updates
 
     # Exploration gated by this flag — set after second user trigger
     exploring = False
@@ -73,8 +73,8 @@ def main():
                 start_index=pkt.crumb_batch_start,
             )
 
-        # --- Transform position to map frame ---
-        map_x, map_y = store.local_to_map(pkt.drone_id, pkt.ned_x, pkt.ned_y)
+        # Telemetry position is already in map frame (converted on ESP32)
+        map_x, map_y = pkt.ned_x, pkt.ned_y
 
         # --- Periodic status log (every 2 s) ---
         now = time.monotonic()

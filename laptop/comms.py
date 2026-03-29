@@ -22,7 +22,10 @@ import socket
 import threading
 import logging
 import time
+from pathlib import Path
 from typing import Callable, Optional
+
+import yaml
 
 from protocol import (
     TelemetryPacket, CommandPacket, NavTag,
@@ -36,8 +39,23 @@ TelemetryCallback = Callable[[TelemetryPacket, str], None]
 NAV_TAG_RESEND_INTERVAL = 20.0   # seconds between periodic re-broadcasts
 
 
+def _load_nav_tags(config_path: str) -> tuple[list[NavTag], dict[int, tuple[float, float]]]:
+    """Load nav tags and drone start positions from setup.yaml."""
+    cfg = yaml.safe_load(Path(config_path).read_text())
+    tags = [
+        NavTag(id=int(tag_id), map_x=pos["map_x"], map_y=pos["map_y"])
+        for tag_id, pos in cfg.get("nav_tags", {}).items()
+    ]
+    drone_starts = {
+        int(did): (float(props["start_x"]), float(props["start_y"]))
+        for did, props in cfg.get("drones", {}).items()
+    }
+    return tags, drone_starts
+
+
 class CommsNode:
-    def __init__(self, listen_port: int = 5005, cmd_port: int = 5006):
+    def __init__(self, listen_port: int = 5005, cmd_port: int = 5006,
+                 config_path: str | None = None):
         self._listen_port = listen_port
         self._cmd_port    = cmd_port
 
@@ -56,6 +74,10 @@ class CommsNode:
         self._nav_tags_per_drone: dict[int, bytes] = {}
         # Fallback for drone IDs not in drone_starts (assumes start at map origin)
         self._nav_tags_default: bytes = b""
+
+        if config_path is not None:
+            tags, drone_starts = _load_nav_tags(config_path)
+            self.set_nav_tags(tags, drone_starts)
 
     # -----------------------------------------------------------------------
     # Lifecycle

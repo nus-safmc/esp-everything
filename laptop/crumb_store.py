@@ -75,7 +75,7 @@ class CrumbStore:
             # Append to combined array
             pts = np.array(new_crumbs, dtype=np.float32)
             self._all_pts = np.vstack([self._all_pts, pts])
-            self._dirty_count += len(mapped)
+            self._dirty_count += len(new_crumbs)
 
             # Rebuild tree if enough new crumbs accumulated
             if self._dirty_count >= self._rebuild_threshold:

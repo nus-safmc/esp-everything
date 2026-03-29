@@ -47,6 +47,81 @@ static float wrap_pi(float a)
 }
 
 /* ---------------------------------------------------------------------------
+ * Emergency collision avoidance
+ *
+ * Scans all 64 collapsed-scan range points.  If any point is below
+ * COLLISION_DANGER_M, computes a repulsion velocity in NED frame and
+ * commands it directly, bypassing all normal navigation logic.
+ *
+ * Returns true if avoidance fired (caller should skip the rest of nav_tick).
+ * --------------------------------------------------------------------------- */
+#define COLLISION_DANGER_M    0.20f   /* trigger threshold (m)                    */
+#define COLLISION_CLEAR_M     0.30f   /* resume normal nav once all points above  */
+#define COLLISION_SPEED_MS    0.4f    /* escape velocity magnitude (m/s)          */
+#define COLLISION_SCAN_PTS    (TOF_SENSOR_COUNT * TOF_SENSOR_RESO)  /* 64         */
+
+static bool s_collision_active = false;
+
+static bool collision_avoid(float goal_z)
+{
+    if (!mavlink_position_valid()) return false;
+
+    tof_scan_collapsed_t scan = tof_get_collapsed_scan();
+    drone_state_t drone = mavlink_get_state();
+
+    /* Determine the threshold: once active, require CLEAR_M before releasing */
+    float threshold = s_collision_active ? COLLISION_CLEAR_M : COLLISION_DANGER_M;
+
+    /* Accumulate repulsion vector in NED frame.
+     * Scan index 0 = front (0°), CW.  Each point covers 360/64 = 5.625°. */
+    float repulse_n = 0.0f;
+    float repulse_e = 0.0f;
+    int   threats   = 0;
+
+    for (int i = 0; i < COLLISION_SCAN_PTS; i++) {
+        if (scan.ranges[i] >= threshold) continue;
+
+        /* Body-frame angle of this scan point (CW from forward, radians) */
+        float body_rad = (float)i * (2.0f * (float)M_PI / (float)COLLISION_SCAN_PTS);
+        /* NED angle */
+        float ned_rad = drone.heading + body_rad;
+
+        /* Weight: closer = stronger repulsion (1 at 0m, 0 at threshold) */
+        float weight = 1.0f - (scan.ranges[i] / threshold);
+
+        /* Push AWAY from this direction */
+        repulse_n -= weight * cosf(ned_rad);
+        repulse_e -= weight * sinf(ned_rad);
+        threats++;
+    }
+
+    if (threats == 0) {
+        if (s_collision_active) {
+            ESP_LOGI(TAG, "Collision clear — resuming nav");
+            s_collision_active = false;
+        }
+        return false;
+    }
+
+    /* Normalise and scale to fixed escape speed */
+    float mag = sqrtf(repulse_n * repulse_n + repulse_e * repulse_e);
+    if (mag < 1e-6f) return false;
+
+    float vn = COLLISION_SPEED_MS * (repulse_n / mag);
+    float ve = COLLISION_SPEED_MS * (repulse_e / mag);
+
+    mavlink_set_velocity_xy_position_z(vn, ve, goal_z, drone.heading);
+
+    if (!s_collision_active) {
+        ESP_LOGW(TAG, "COLLISION AVOID — %d threats, escaping (%.2f, %.2f) m/s",
+                 threats, vn, ve);
+        s_collision_active = true;
+    }
+
+    return true;
+}
+
+/* ---------------------------------------------------------------------------
  * nav_tick — executed every 100 ms (10 Hz) by nav_task
  * --------------------------------------------------------------------------- */
 static void nav_tick(const vfh_config_t *vfh_cfg)
@@ -58,6 +133,9 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
 
     /* Nothing to do while idle */
     if (nav.state == NAV_IDLE || !nav.has_goal) return;
+
+    /* --- Emergency collision avoidance (pre-empts everything) --- */
+    if (collision_avoid(nav.goal_z)) return;
 
     /* Require fresh telemetry */
     if (!mavlink_position_valid()) {
