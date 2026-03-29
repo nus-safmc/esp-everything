@@ -14,9 +14,8 @@
 
 static const char *TAG = "mission";
 
-#define PRECISION_ARRIVE_M       0.20f  /* stop horizontal approach (m)           */
-#define PRECISION_LAND_TIMEOUT_S 20     /* give up and land anyway after this (s) */
-#define POSE_LOST_HOLD_MS        1000   /* hold if tag drops out (ms)             */
+#define PRECISION_ARRIVE_M       0.20f  /* close enough to land (m)               */
+#define PRECISION_APPROACH_S     10     /* max seconds to fly to tag position     */
 
 /* ---------------------------------------------------------------------------
  * Test parameters — adjust before flight
@@ -146,12 +145,11 @@ static void mission_task(void *arg)
     }
 
     /* ------------------------------------------------------------------ */
-    /* Phase 6a: Precision approach — fly to directly above the tag        */
+    /* Phase 6a: Fly to tag position (one-shot from last detection)        */
     /* ------------------------------------------------------------------ */
 precision_landing:
-    ESP_LOGI(TAG, "Precision approach: tag %d", at_detect_last_id());
+    ESP_LOGI(TAG, "Precision landing: tag %d", at_detect_last_id());
 
-    /* Stop navigation and take back setpoint ownership */
     if (nav_goal_active || nav_get_status().state != NAV_IDLE) {
         nav_cancel();
         nav_goal_active = false;
@@ -159,44 +157,34 @@ precision_landing:
     vTaskDelay(pdMS_TO_TICKS(200));
 
     {
-        uint32_t lost_since_ms = 0;
-        bool     tag_ever_seen = false;
+        /* Compute tag odom position from the single detection */
+        at_detect_pose_t pose  = at_detect_get_pose();
+        drone_state_t    drone = mavlink_get_state();
 
-        for (int i = 0; i < PRECISION_LAND_TIMEOUT_S * 10; i++) {
-            at_detect_pose_t pose  = at_detect_get_pose();
-            drone_state_t    drone = mavlink_get_state();
+        float tag_x = drone.x;
+        float tag_y = drone.y;
 
-            if (!pose.valid) {
-                mavlink_set_hold();
-                if (tag_ever_seen) {
-                    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
-                    if (lost_since_ms == 0) lost_since_ms = now_ms;
-                    if ((now_ms - lost_since_ms) > POSE_LOST_HOLD_MS) {
-                        ESP_LOGW(TAG, "Tag lost for %.1f s — landing anyway",
-                                 POSE_LOST_HOLD_MS / 1000.0f);
-                        break;
-                    }
-                }
-                vTaskDelay(pdMS_TO_TICKS(100));
-                continue;
-            }
-
-            tag_ever_seen = true;
-            lost_since_ms = 0;
-
+        if (pose.valid) {
             float dn, de, hdist;
             camera_to_ned(pose.tx, pose.ty, pose.tz, drone.heading, &dn, &de, &hdist);
+            tag_x = drone.x + dn;
+            tag_y = drone.y + de;
+            ESP_LOGI(TAG, "Tag at odom (%.2f, %.2f), hdist=%.2f m", tag_x, tag_y, hdist);
+        } else {
+            ESP_LOGW(TAG, "No valid pose — landing in place");
+        }
 
-            ESP_LOGI(TAG, "Tag %d: hdist=%.2f m  target=(%.2f, %.2f) odom",
-                     at_detect_last_id(), hdist, drone.x + dn, drone.y + de);
+        /* Fly to the tag position at cruise altitude */
+        mavlink_set_position_ned(tag_x, tag_y, target_z, drone.heading);
 
-            if (hdist < PRECISION_ARRIVE_M) {
+        for (int i = 0; i < PRECISION_APPROACH_S * 10; i++) {
+            drone = mavlink_get_state();
+            float dx = tag_x - drone.x;
+            float dy = tag_y - drone.y;
+            if (sqrtf(dx * dx + dy * dy) < PRECISION_ARRIVE_M) {
                 ESP_LOGI(TAG, "Above tag — landing");
                 break;
             }
-
-            /* Fly to tag's odom-frame position, hold cruise altitude */
-            mavlink_set_position_ned(drone.x + dn, drone.y + de, target_z, drone.heading);
             vTaskDelay(pdMS_TO_TICKS(100));
         }
     }
