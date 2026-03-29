@@ -29,10 +29,10 @@ drones:
 # Arena bounds (map frame, metres).
 # Goals are clamped inside this rectangle.
 arena:
-  min_x: 0.0
-  max_x: 6.0
-  min_y: 0.0
-  max_y: 6.0
+  min_x: -0.3
+  max_x: 2.1
+  min_y: -1.2
+  max_y: 2.0
 
 # Stuck detection and recovery
 stuck:

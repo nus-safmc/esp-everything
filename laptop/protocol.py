@@ -23,6 +23,7 @@ CMD_GOTO          = 0x01   # navigate to (goal_x, goal_y)
 CMD_LAND          = 0x02   # land immediately
 CMD_HOLD          = 0x03   # hold position, cancel goal
 CMD_SET_NAV_TAGS  = 0x04   # send navigation tag map positions to drone
+CMD_START         = 0x05   # arm and take off
 
 VFH_BINS    = 32
 MAX_CRUMBS_PKT = 10
