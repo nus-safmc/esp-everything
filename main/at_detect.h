@@ -40,6 +40,9 @@ typedef struct {
     float tx, ty, tz;   /* translation from camera origin to tag centre */
     bool  valid;        /* true only when a low-error estimate exists    */
     int   tag_id;
+    float drone_x;      /* drone odom position at time of detection     */
+    float drone_y;
+    float drone_heading; /* drone heading at time of detection (rad)    */
 } at_detect_pose_t;
 
 /* Thread-safe snapshot of the latest pose estimate.
