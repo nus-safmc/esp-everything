@@ -14,7 +14,6 @@
 
 static const char *TAG = "mission";
 
-#define PRECISION_ARRIVE_M       0.20f  /* close enough to land (m)               */
 #define PRECISION_APPROACH_S     10     /* max seconds to fly to tag position     */
 
 /* ---------------------------------------------------------------------------
@@ -174,19 +173,18 @@ precision_landing:
             ESP_LOGW(TAG, "No valid pose — landing in place");
         }
 
-        /* Fly to the tag position at cruise altitude */
-        mavlink_set_position_ned(tag_x, tag_y, target_z, drone.heading);
+        /* Fly to the tag position using nav_task (VFH+ obstacle avoidance) */
+        nav_set_goal_ned(tag_x, tag_y, target_z);
 
         for (int i = 0; i < PRECISION_APPROACH_S * 10; i++) {
-            drone = mavlink_get_state();
-            float dx = tag_x - drone.x;
-            float dy = tag_y - drone.y;
-            if (sqrtf(dx * dx + dy * dy) < PRECISION_ARRIVE_M) {
+            nav_state_t ns = nav_get_status().state;
+            if (ns == NAV_ARRIVED) {
                 ESP_LOGI(TAG, "Above tag — landing");
                 break;
             }
             vTaskDelay(pdMS_TO_TICKS(100));
         }
+        nav_cancel();
     }
 
     /* ------------------------------------------------------------------ */
