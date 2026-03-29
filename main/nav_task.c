@@ -59,9 +59,18 @@ static float wrap_pi(float a)
  * This makes VFH treat other drones as physical obstacles — the density
  * weighting and growth step handle safety margins automatically.
  * --------------------------------------------------------------------------- */
-#define PEER_INJECT_RANGE_M   3.0f   /* ignore peers beyond this distance      */
-#define PEER_DENSITY_MAX      3.0f   /* density added at distance 0 (compare density_threshold=1.5) */
-#define PEER_BIN_SPREAD       2      /* inject into ±N VFH bins around bearing */
+/* Peer avoidance tuning:
+ *
+ *  A peer blocks its VFH bin when density >= density_threshold (1.5).
+ *  density_at_d = PEER_DENSITY_MAX * (1 − d / PEER_INJECT_RANGE_M)
+ *  Blocking distance = PEER_INJECT_RANGE_M * (1 − 1.5/PEER_DENSITY_MAX)
+ *
+ *  With the values below:  block at 4.0 * (1 − 1.5/9.0) = 3.33 m
+ *  Head-on at 0.6 m/s each → 3.33 / 1.2 = 2.8 s warning.
+ */
+#define PEER_INJECT_RANGE_M   4.0f   /* ignore peers beyond this distance (m)  */
+#define PEER_DENSITY_MAX      9.0f   /* density at distance 0 (threshold=1.5)  */
+#define PEER_BIN_SPREAD       3      /* inject into ±N VFH bins around bearing */
 
 static void inject_peers_into_histogram(float hist[VFH_BINS],
                                         float drone_x, float drone_y,
