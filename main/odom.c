@@ -116,7 +116,7 @@ void odom_on_tag_seen(int tag_id, float cam_tag_x, float cam_tag_y)
     if (!odom_find_nav_tag(tag_id, &nav)) return;
 
     /* Tag→NED axis mapping: tag_Y → odom north, tag_X → odom east */
-    float inferred_odom_x = nav.x + cam_tag_y;
+    float inferred_odom_x = nav.x - cam_tag_y;
     float inferred_odom_y = nav.y + cam_tag_x;
 
     drone_state_t state = mavlink_get_state();

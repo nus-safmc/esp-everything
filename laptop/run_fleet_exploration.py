@@ -16,6 +16,7 @@ import argparse
 import logging
 import signal
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -24,6 +25,7 @@ import yaml
 from comms import CommsNode
 from crumb_store import CrumbStore
 from exploration import ExplorationDirector
+from visualise import Visualiser
 from protocol import (
     CMD_GOTO, CMD_LAND, CMD_START, CommandPacket,
     NAV_IDLE, NAV_ARRIVED, NAV_STUCK,
@@ -55,7 +57,7 @@ def main():
     comms    = CommsNode(listen_port=args.telem_port, cmd_port=args.cmd_port,
                          config_path=args.config)
 
-    GOAL_INTERVAL = 0.5  # seconds between goal updates per drone
+    GOAL_INTERVAL = 1.0 # seconds between goal updates per drone
 
     # Per-drone state
     last_goal_time: dict[int, float]              = {d: 0.0 for d in drone_ids}
@@ -122,6 +124,10 @@ def main():
 
     comms.on_telemetry(on_telemetry)
 
+    # --- Visualiser (fed via callback, no separate socket) ---
+    vis = Visualiser(args.config)
+    comms.on_telemetry(vis.feed)
+
     # --- Ctrl+C handler ---
     shutdown = False
 
@@ -137,45 +143,64 @@ def main():
     comms.start()
     log.info("Listening for %d drones on port %d...", len(drone_ids), args.telem_port)
 
-    # --- Trigger 1: arm + takeoff all drones ---
-    print(f"\nPress Enter to send CMD_START to all {len(drone_ids)} drones, "
-          "or Ctrl+C to abort.")
-    try:
-        input()
-    except (EOFError, KeyboardInterrupt):
-        shutdown = True
+    # --- Interactive triggers + run loop (background thread) ---
+    # matplotlib needs the main thread, so we run the trigger/wait logic
+    # in a daemon thread and give the main thread to vis.run().
+    def control_loop():
+        nonlocal exploring, shutdown
 
-    if not shutdown:
-        log.info("Sending CMD_START to all drones")
-        comms.send_all(CommandPacket(CMD_START))
-
-    # --- Trigger 2: start exploration ---
-    if not shutdown:
-        print("\nPress Enter to start fleet exploration, or Ctrl+C to land all.")
+        # Trigger 1: arm + takeoff all drones
+        print(f"\nPress Enter to send CMD_START to all {len(drone_ids)} drones, "
+              "or Ctrl+C to abort.")
         try:
             input()
         except (EOFError, KeyboardInterrupt):
             shutdown = True
 
-    if not shutdown:
-        log.info("Starting fleet exploration")
-        exploring = True
+        if not shutdown:
+            log.info("Sending CMD_START to all drones")
+            comms.send_all(CommandPacket(CMD_START))
 
-    # --- Run until Ctrl+C ---
+        # Trigger 2: start exploration
+        if not shutdown:
+            print("\nPress Enter to start fleet exploration, or Ctrl+C to land all.")
+            try:
+                input()
+            except (EOFError, KeyboardInterrupt):
+                shutdown = True
+
+        if not shutdown:
+            log.info("Starting fleet exploration")
+            exploring = True
+
+        # Run until Ctrl+C
+        try:
+            while not shutdown:
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            pass
+
+        # Land all
+        log.info("Sending CMD_LAND to all drones")
+        comms.send_all(CommandPacket(CMD_LAND))
+        time.sleep(1.0)
+        comms.stop()
+
+        total_goals = sum(goal_counts.values())
+        log.info("Done. %d total goals, %d total crumbs.", total_goals, store.total_crumbs())
+
+    ctrl_thread = threading.Thread(target=control_loop, daemon=True)
+    ctrl_thread.start()
+
+    # Main thread: matplotlib event loop (blocks until window closed)
     try:
-        while not shutdown:
-            time.sleep(0.5)
+        vis.run()
     except KeyboardInterrupt:
         pass
 
-    # --- Land all ---
-    log.info("Sending CMD_LAND to all drones")
-    comms.send_all(CommandPacket(CMD_LAND))
-    time.sleep(1.0)
-    comms.stop()
-
-    total_goals = sum(goal_counts.values())
-    log.info("Done. %d total goals, %d total crumbs.", total_goals, store.total_crumbs())
+    # If the window is closed, trigger shutdown so control_loop exits
+    shutdown = True
+    ctrl_thread.join(timeout=3.0)
 
 
 if __name__ == "__main__":

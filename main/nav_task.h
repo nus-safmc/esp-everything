@@ -8,7 +8,7 @@
  * FreeRTOS placement — Core 1, Priority 3 (below MAVLink/ToF on Core 0)
  * --------------------------------------------------------------------------- */
 #define NAV_TASK_CORE       1
-#define NAV_TASK_PRIORITY   3
+#define NAV_TASK_PRIORITY   4
 #define NAV_TASK_STACK      4096
 
 /* ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@
  *  NAV_STUCK_MIN_FREE  Min free VFH bins before exiting STUCK on retry.
  *                      2 avoids retrying on a single-bin noise artefact.
  * --------------------------------------------------------------------------- */
-#define NAV_CRUISE_SPEED_MS     0.6f    /* forward cruise speed (m/s)            */
+#define NAV_CRUISE_SPEED_MS     0.4f    /* forward cruise speed (m/s)            */
 #define NAV_YAW_TOL_RAD         0.1f   
 #define NAV_ARRIVE_RADIUS_M     0.25f   /* XY goal-reached radius (m)            */
 #define NAV_STUCK_HOLD_MS       3500    /* hold duration before declaring stuck   */

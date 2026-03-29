@@ -110,8 +110,8 @@ static void inject_peers_into_histogram(float hist[VFH_BINS],
  *
  * Returns true if avoidance fired (caller should skip the rest of nav_tick).
  * --------------------------------------------------------------------------- */
-#define COLLISION_DANGER_M    0.32f   /* trigger threshold (m)                    */
-#define COLLISION_CLEAR_M     0.45f   /* resume normal nav once all points above  */
+#define COLLISION_DANGER_M    0.37f   /* trigger threshold (m)                    */
+#define COLLISION_CLEAR_M     0.47f   /* resume normal nav once all points above  */
 #define COLLISION_SPEED_MS    0.6f    /* escape velocity magnitude (m/s)          */
 
 static bool s_collision_active = false;
@@ -399,6 +399,6 @@ void nav_task(void *arg)
 
     while (1) {
         nav_tick(&vfh_cfg);
-        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(50));  /* 10 Hz */
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
     }
 }

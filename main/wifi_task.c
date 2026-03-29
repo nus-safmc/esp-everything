@@ -107,7 +107,7 @@ static void handle_command(const wifi_cmd_pkt_t *cmd)
         /* Goals arrive in map frame — convert to odom before passing to nav */
         float odom_x, odom_y;
         map_to_odom(cmd->goal_x, cmd->goal_y, &odom_x, &odom_y);
-        nav_set_goal_ned(cmd->goal_x, cmd->goal_y, -(WIFI_CRUISE_ALT_M));
+        nav_set_goal_ned(odom_x, odom_y, -(WIFI_CRUISE_ALT_M));
         ESP_LOGI(TAG, "CMD_GOTO map(%.2f,%.2f) → odom(%.2f,%.2f)",
                  cmd->goal_x, cmd->goal_y, odom_x, odom_y);
         break;
