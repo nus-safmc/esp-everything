@@ -3,6 +3,8 @@
 #include "tof_task.h"
 #include "vfh.h"
 #include "breadcrumb.h"
+#include "wifi_task.h"
+#include "odom.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -47,6 +49,55 @@ static float wrap_pi(float a)
 }
 
 /* ---------------------------------------------------------------------------
+ * Inject peer drone positions as virtual obstacles into the collapsed scan.
+ *
+ * For each peer within VFH range, computes the body-frame bearing and
+ * distance, then writes the distance into the corresponding scan bin(s).
+ * This makes VFH treat other drones as physical obstacles — the density
+ * weighting and growth step handle safety margins automatically.
+ * --------------------------------------------------------------------------- */
+#define PEER_INJECT_RANGE_M   3.0f   /* ignore peers beyond this distance      */
+#define PEER_ANGULAR_RADIUS   3      /* inject into ±N scan bins around bearing */
+
+static void inject_peers(tof_scan_collapsed_t *scan, float drone_x, float drone_y,
+                         float heading)
+{
+    wifi_peer_list_t peers = wifi_get_peers();
+
+    for (int p = 0; p < peers.count; p++) {
+        /* Convert peer from map frame to odom frame */
+        float odom_x, odom_y;
+        map_to_odom(peers.peers[p].map_x, peers.peers[p].map_y, &odom_x, &odom_y);
+
+        float dx   = odom_x - drone_x;
+        float dy   = odom_y - drone_y;
+        float dist = sqrtf(dx * dx + dy * dy);
+
+        if (dist > PEER_INJECT_RANGE_M || dist < 0.01f) continue;
+
+        /* NED bearing to peer, then convert to body frame */
+        float ned_bearing  = atan2f(dy, dx);
+        float body_bearing = ned_bearing - heading;
+        /* Normalise to [0, 2π) */
+        body_bearing = fmodf(body_bearing, 2.0f * (float)M_PI);
+        if (body_bearing < 0.0f) body_bearing += 2.0f * (float)M_PI;
+
+        /* Map to scan index (0 = front, CW, 64 bins) */
+        int center_idx = (int)(body_bearing * (float)COLLISION_SCAN_PTS
+                               / (2.0f * (float)M_PI));
+        center_idx %= COLLISION_SCAN_PTS;
+
+        /* Inject into center ± PEER_ANGULAR_RADIUS bins */
+        for (int d = -PEER_ANGULAR_RADIUS; d <= PEER_ANGULAR_RADIUS; d++) {
+            int idx = (center_idx + d + COLLISION_SCAN_PTS) % COLLISION_SCAN_PTS;
+            if (dist < scan->ranges[idx]) {
+                scan->ranges[idx] = dist;
+            }
+        }
+    }
+}
+
+/* ---------------------------------------------------------------------------
  * Emergency collision avoidance
  *
  * Scans all 64 collapsed-scan range points.  If any point is below
@@ -55,9 +106,9 @@ static float wrap_pi(float a)
  *
  * Returns true if avoidance fired (caller should skip the rest of nav_tick).
  * --------------------------------------------------------------------------- */
-#define COLLISION_DANGER_M    0.20f   /* trigger threshold (m)                    */
-#define COLLISION_CLEAR_M     0.30f   /* resume normal nav once all points above  */
-#define COLLISION_SPEED_MS    0.4f    /* escape velocity magnitude (m/s)          */
+#define COLLISION_DANGER_M    0.32f   /* trigger threshold (m)                    */
+#define COLLISION_CLEAR_M     0.45f   /* resume normal nav once all points above  */
+#define COLLISION_SPEED_MS    0.6f    /* escape velocity magnitude (m/s)          */
 #define COLLISION_SCAN_PTS    (TOF_SENSOR_COUNT * TOF_SENSOR_RESO)  /* 64         */
 
 static bool s_collision_active = false;
@@ -131,11 +182,12 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
     nav_internal_t nav = s_nav;
     xSemaphoreGive(s_mutex);
 
+    /* --- Emergency collision avoidance (pre-empts everything, even idle) --- */
+    float hold_z = nav.has_goal ? nav.goal_z : -0.5f;  /* fallback cruise alt */
+    if (collision_avoid(hold_z)) return;
+
     /* Nothing to do while idle */
     if (nav.state == NAV_IDLE || !nav.has_goal) return;
-
-    /* --- Emergency collision avoidance (pre-empts everything) --- */
-    if (collision_avoid(nav.goal_z)) return;
 
     /* Require fresh telemetry */
     if (!mavlink_position_valid()) {
@@ -176,6 +228,9 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
      * If not stuck, call vfh_compute for the best steering direction.
      * vfh_compute re-runs the histogram internally — acceptable at 10 Hz. */
     tof_scan_collapsed_t scan = tof_get_collapsed_scan();
+
+    /* Inject peer drones as virtual obstacles before VFH processing */
+    inject_peers(&scan, drone.x, drone.y, drone.heading);
 
     float hist[VFH_BINS];
     bool  blocked[VFH_BINS];

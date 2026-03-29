@@ -30,6 +30,10 @@ static const char *TAG = "wifi";
 static volatile bool s_land_requested  = false;
 static volatile bool s_start_requested = false;
 
+/* Peer drone positions (map frame), protected by s_peer_mutex */
+static wifi_peer_list_t   s_peers = { .count = 0 };
+static SemaphoreHandle_t  s_peer_mutex;
+
 static EventGroupHandle_t s_wifi_events;
 
 /* ---------------------------------------------------------------------------
@@ -53,6 +57,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
  * --------------------------------------------------------------------------- */
 void wifi_task_init(void)
 {
+    s_peer_mutex  = xSemaphoreCreateMutex();
+    configASSERT(s_peer_mutex != NULL);
     s_wifi_events = xEventGroupCreate();
 
     ESP_ERROR_CHECK(esp_netif_init());
@@ -154,6 +160,43 @@ static void handle_nav_tags(const uint8_t *buf, int len)
              tag_count, start_map_x, start_map_y);
 }
 
+/* Parse and apply a CMD_SET_PEERS packet.
+ * Wire format: pkt_type(1) + cmd_type(1) + count(1) + count * (float, float) */
+static void handle_peers(const uint8_t *buf, int len)
+{
+    if (len < 3) return;
+    uint8_t count = buf[2];
+    if (count > WIFI_MAX_PEERS) count = WIFI_MAX_PEERS;
+
+    int expected = 3 + count * (int)(2 * sizeof(float));
+    if (len < expected) {
+        ESP_LOGW(TAG, "CMD_SET_PEERS truncated (%d < %d)", len, expected);
+        return;
+    }
+
+    wifi_peer_list_t list;
+    list.count = count;
+    const uint8_t *p = buf + 3;
+    for (int i = 0; i < count; i++) {
+        memcpy(&list.peers[i].map_x, p, sizeof(float)); p += sizeof(float);
+        memcpy(&list.peers[i].map_y, p, sizeof(float)); p += sizeof(float);
+    }
+
+    xSemaphoreTake(s_peer_mutex, portMAX_DELAY);
+    s_peers = list;
+    xSemaphoreGive(s_peer_mutex);
+
+    ESP_LOGD(TAG, "CMD_SET_PEERS: %d peers", count);
+}
+
+wifi_peer_list_t wifi_get_peers(void)
+{
+    xSemaphoreTake(s_peer_mutex, portMAX_DELAY);
+    wifi_peer_list_t copy = s_peers;
+    xSemaphoreGive(s_peer_mutex);
+    return copy;
+}
+
 /* ---------------------------------------------------------------------------
  * wifi_task — 10 Hz telemetry loop + non-blocking command receive
  * --------------------------------------------------------------------------- */
@@ -196,6 +239,8 @@ void wifi_task(void *arg)
             if (len >= 2 && cmd_buf[0] == WIFI_PKT_CMD) {
                 if (cmd_buf[1] == CMD_SET_NAV_TAGS) {
                     handle_nav_tags(cmd_buf, len);
+                } else if (cmd_buf[1] == CMD_SET_PEERS) {
+                    handle_peers(cmd_buf, len);
                 } else if (len >= (int)sizeof(wifi_cmd_pkt_t)) {
                     handle_command((const wifi_cmd_pkt_t *)cmd_buf);
                 }

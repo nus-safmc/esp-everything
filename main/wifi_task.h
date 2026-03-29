@@ -67,6 +67,7 @@ typedef struct __attribute__((packed)) {
 #define CMD_HOLD          0x03
 #define CMD_SET_NAV_TAGS  0x04
 #define CMD_START         0x05   /* arm and take off */
+#define CMD_SET_PEERS     0x06   /* update nearby drone positions */
 
 /* ---------------------------------------------------------------------------
  * Navigation-tag position packet — received from laptop over UDP.
@@ -89,6 +90,25 @@ typedef struct __attribute__((packed)) {
     float    start_map_y;   /* this drone's start position in map frame (NED east)  */
     wifi_nav_tag_entry_t tags[WIFI_MAX_NAV_TAGS];
 } wifi_nav_tags_pkt_t;
+
+/* ---------------------------------------------------------------------------
+ * Peer drone positions — received from laptop, used for inter-drone avoidance.
+ * Positions are in map frame; nav_task converts to odom for VFH injection.
+ * --------------------------------------------------------------------------- */
+#define WIFI_MAX_PEERS  7
+
+typedef struct {
+    float map_x;    /* NED north in map frame (m) */
+    float map_y;    /* NED east  in map frame (m) */
+} wifi_peer_t;
+
+typedef struct {
+    wifi_peer_t peers[WIFI_MAX_PEERS];
+    uint8_t     count;
+} wifi_peer_list_t;
+
+/* Thread-safe snapshot of current peer positions. */
+wifi_peer_list_t wifi_get_peers(void);
 
 /* ---------------------------------------------------------------------------
  * Lifecycle
