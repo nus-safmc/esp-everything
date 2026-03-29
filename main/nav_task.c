@@ -112,7 +112,7 @@ static void inject_peers_into_histogram(float hist[VFH_BINS],
  * --------------------------------------------------------------------------- */
 #define COLLISION_DANGER_M    0.37f   /* trigger threshold (m)                    */
 #define COLLISION_CLEAR_M     0.47f   /* resume normal nav once all points above  */
-#define COLLISION_SPEED_MS    0.6f    /* escape velocity magnitude (m/s)          */
+#define COLLISION_SPEED_MS    0.35f    /* escape velocity magnitude (m/s)          */
 
 static bool s_collision_active = false;
 
@@ -126,27 +126,28 @@ static bool collision_avoid(float goal_z)
     /* Determine the threshold: once active, require CLEAR_M before releasing */
     float threshold = s_collision_active ? COLLISION_CLEAR_M : COLLISION_DANGER_M;
 
-    /* Accumulate repulsion vector in NED frame.
+    /* Accumulate repulsion vector in body frame.
      * Scan index 0 = front (0°), CW.  Each point covers 360/64 = 5.625°. */
-    float repulse_n = 0.0f;
-    float repulse_e = 0.0f;
-    int   threats   = 0;
+    float repulse_fwd  = 0.0f;   /* body X: positive = forward             */
+    float repulse_rght = 0.0f;   /* body Y: positive = right               */
+    int   threats      = 0;
+    float closest      = 999.0f;
 
     for (int i = 0; i < COLLISION_SCAN_PTS; i++) {
         if (scan.ranges[i] >= threshold) continue;
 
         /* Body-frame angle of this scan point (CW from forward, radians) */
         float body_rad = (float)i * (2.0f * (float)M_PI / (float)COLLISION_SCAN_PTS);
-        /* NED angle */
-        float ned_rad = drone.heading + body_rad;
 
         /* Weight: closer = stronger repulsion (1 at 0m, 0 at threshold) */
         float weight = 1.0f - (scan.ranges[i] / threshold);
 
-        /* Push AWAY from this direction */
-        repulse_n -= weight * cosf(ned_rad);
-        repulse_e -= weight * sinf(ned_rad);
+        /* Push AWAY from this direction (body frame) */
+        repulse_fwd  -= weight * cosf(body_rad);
+        repulse_rght -= weight * sinf(body_rad);
         threats++;
+
+        if (scan.ranges[i] < closest) closest = scan.ranges[i];
     }
 
     if (threats == 0) {
@@ -157,19 +158,44 @@ static bool collision_avoid(float goal_z)
         return false;
     }
 
-    /* Normalise and scale to fixed escape speed */
-    float mag = sqrtf(repulse_n * repulse_n + repulse_e * repulse_e);
-    if (mag < 1e-6f) return false;
+    /* Check if repulsion vectors nearly cancel (e.g. narrow corridor with
+     * walls on both sides).  In that case, let VFH handle navigation
+     * instead of oscillating between walls.  Only intervene if the net
+     * repulsion has meaningful magnitude relative to the total threat weight. */
+    float body_mag = sqrtf(repulse_fwd * repulse_fwd + repulse_rght * repulse_rght);
+    if (body_mag < 0.3f && closest > 0.18f) {
+        /* Opposing threats nearly cancel and nothing is dangerously close —
+         * release collision avoidance so VFH can navigate the corridor. */
+        if (s_collision_active) {
+            ESP_LOGI(TAG, "Collision: opposing threats cancel (mag=%.2f), releasing to VFH",
+                     body_mag);
+            s_collision_active = false;
+        }
+        return false;
+    }
 
-    float vn = COLLISION_SPEED_MS * (repulse_n / mag);
-    float ve = COLLISION_SPEED_MS * (repulse_e / mag);
+    /* Convert body-frame repulsion to NED */
+    float cos_h = cosf(drone.heading);
+    float sin_h = sinf(drone.heading);
+    float repulse_n = repulse_fwd * cos_h - repulse_rght * sin_h;
+    float repulse_e = repulse_fwd * sin_h + repulse_rght * cos_h;
+
+    /* Normalise and scale to fixed escape speed */
+    float ned_mag = sqrtf(repulse_n * repulse_n + repulse_e * repulse_e);
+    if (ned_mag < 1e-6f) return false;
+
+    float vn = COLLISION_SPEED_MS * (repulse_n / ned_mag);
+    float ve = COLLISION_SPEED_MS * (repulse_e / ned_mag);
 
     mavlink_set_velocity_xy_position_z(vn, ve, goal_z, drone.heading);
 
     if (!s_collision_active) {
-        ESP_LOGW(TAG, "COLLISION AVOID — %d threats, escaping (%.2f, %.2f) m/s",
-                 threats, vn, ve);
+        ESP_LOGW(TAG, "COLLISION AVOID — %d threats, closest=%.2fm, escape=(%.2f,%.2f) m/s",
+                 threats, closest, vn, ve);
         s_collision_active = true;
+    } else {
+        ESP_LOGD(TAG, "COLLISION: %d threats, closest=%.2fm, vel=(%.2f,%.2f)",
+                 threats, closest, vn, ve);
     }
 
     return true;
