@@ -66,6 +66,7 @@ typedef struct __attribute__((packed)) {
 #define CMD_LAND          0x02
 #define CMD_HOLD          0x03
 #define CMD_SET_NAV_TAGS  0x04
+#define CMD_START         0x05   /* arm and take off */
 
 /* ---------------------------------------------------------------------------
  * Navigation-tag position packet — received from laptop over UDP.
@@ -99,3 +100,15 @@ void wifi_task_init(void);
  *   xTaskCreatePinnedToCore(wifi_task, "wifi", WIFI_TASK_STACK,
  *                           NULL, WIFI_TASK_PRIORITY, NULL, WIFI_TASK_CORE); */
 void wifi_task(void *arg);
+
+/* Returns true once the laptop has sent CMD_LAND. */
+bool wifi_land_requested(void);
+
+/* Clear the land-request flag (call after acting on it). */
+void wifi_clear_land_request(void);
+
+/* Returns true once the laptop has sent CMD_START. */
+bool wifi_start_requested(void);
+
+/* Clear the start-request flag (call after acting on it). */
+void wifi_clear_start_request(void);

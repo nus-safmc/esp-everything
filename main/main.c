@@ -72,6 +72,16 @@ static void mission_task(void *arg)
     vTaskDelay(pdMS_TO_TICKS(2000));
 
     /* ------------------------------------------------------------------ */
+    /* Phase 2b: Wait for CMD_START from laptop                           */
+    /* ------------------------------------------------------------------ */
+    ESP_LOGI(TAG, "Waiting for CMD_START from laptop...");
+    while (!wifi_start_requested()) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    wifi_clear_start_request();
+    ESP_LOGI(TAG, "CMD_START received — proceeding to arm");
+
+    /* ------------------------------------------------------------------ */
     /* Phase 3a: Switch to OFFBOARD mode                                   */
     /* Retry every 500 ms until PX4 confirms via heartbeat custom_main_mode */
     /* ------------------------------------------------------------------ */
@@ -131,36 +141,18 @@ static void mission_task(void *arg)
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     /* ------------------------------------------------------------------ */
-    /* Phase 5: Navigate to goal using VFH obstacle avoidance             */
-    /* nav_task takes ownership of setpoints from here.                    */
+    /* Phase 5: Laptop-driven exploration                                 */
+    /* Goals arrive via CMD_GOTO from the laptop (handled in wifi_task).  */
+    /* This loop just monitors for landing triggers.                       */
     /* ------------------------------------------------------------------ */
-    float goal_x = takeoff_x + GOAL_OFFSET_X_M;
-    float goal_y = takeoff_y + GOAL_OFFSET_Y_M;
-    nav_set_goal_ned(goal_x, goal_y, target_z);
-    nav_goal_active = true;
-    ESP_LOGI(TAG, "Goal: NED (%.2f, %.2f, %.2f)  —  navigating...", goal_x, goal_y, target_z);
+    nav_goal_active = true;   /* wifi_task owns nav goals from here */
+    ESP_LOGI(TAG, "Exploration mode — waiting for laptop goals...");
 
-    /* Poll navigation status until arrived, stuck, or timeout */
-    for (int i = 0; i < NAV_TIMEOUT_S * 5; i++) {   /* 5 polls/s */
-        if (mission_should_land_from_apriltag("navigation")) goto precision_landing;
-        nav_status_t ns = nav_get_status();
-
-        static const char *state_names[] = {
-            "IDLE", "ROTATING", "FLYING", "ARRIVED", "STUCK"
-        };
-        ESP_LOGI(TAG, "nav=%s  dist=%.2f m  free_bins=%d  steer=%.1f°",
-                 state_names[ns.state],
-                 ns.dist_to_goal,
-                 ns.free_bins,
-                 ns.vfh_steering_rad * 180.0f / 3.14159f);
-
-        if (ns.state == NAV_ARRIVED) {
-            ESP_LOGI(TAG, "Goal reached!");
-            nav_goal_active = false;
-            break;
-        }
-        if (ns.state == NAV_STUCK && ns.stuck_count > 3) {
-            ESP_LOGW(TAG, "Navigator stuck repeatedly — aborting mission");
+    while (1) {
+        if (mission_should_land_from_apriltag("exploration")) goto precision_landing;
+        if (wifi_land_requested()) {
+            wifi_clear_land_request();
+            ESP_LOGI(TAG, "CMD_LAND received from laptop");
             nav_goal_active = false;
             break;
         }

@@ -24,6 +24,12 @@ static const char *TAG = "wifi";
 
 #define WIFI_CONNECTED_BIT  BIT0
 
+/* Cruise altitude for CMD_GOTO — must match CRUISE_ALT_M in main.c */
+#define WIFI_CRUISE_ALT_M   0.5f
+
+static volatile bool s_land_requested  = false;
+static volatile bool s_start_requested = false;
+
 static EventGroupHandle_t s_wifi_events;
 
 /* ---------------------------------------------------------------------------
@@ -89,13 +95,19 @@ static void handle_command(const wifi_cmd_pkt_t *cmd)
     switch (cmd->cmd_type) {
     case CMD_GOTO:
         ESP_LOGI(TAG, "CMD_GOTO (%.2f, %.2f)", cmd->goal_x, cmd->goal_y);
-        /* TODO: hook into nav_set_goal_ned when laptop goal control is wired */
+        nav_set_goal_ned(cmd->goal_x, cmd->goal_y, -(WIFI_CRUISE_ALT_M));
+        break;
+    case CMD_START:
+        ESP_LOGI(TAG, "CMD_START");
+        s_start_requested = true;
         break;
     case CMD_LAND:
         ESP_LOGI(TAG, "CMD_LAND");
+        s_land_requested = true;
         break;
     case CMD_HOLD:
         ESP_LOGI(TAG, "CMD_HOLD");
+        nav_cancel();
         break;
     default:
         ESP_LOGW(TAG, "Unknown cmd type 0x%02x", cmd->cmd_type);
@@ -227,4 +239,24 @@ void wifi_task(void *arg)
 
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(100));   /* 10 Hz */
     }
+}
+
+bool wifi_land_requested(void)
+{
+    return s_land_requested;
+}
+
+void wifi_clear_land_request(void)
+{
+    s_land_requested = false;
+}
+
+bool wifi_start_requested(void)
+{
+    return s_start_requested;
+}
+
+void wifi_clear_start_request(void)
+{
+    s_start_requested = false;
 }
