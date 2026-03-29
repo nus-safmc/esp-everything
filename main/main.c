@@ -8,6 +8,7 @@
 #include "nav_task.h"
 #include "at_detect.h"
 #include "wifi_task.h"
+#include "odom.h"
 
 #include <math.h>
 
@@ -282,6 +283,7 @@ void app_main(void)
     tof_task_init();
     nav_task_init();
     at_detect_init();
+    odom_init();
     wifi_task_init();   /* blocks until IP obtained */
 
     /* Core 0: hardware-facing tasks + WiFi telemetry */

@@ -62,9 +62,30 @@ typedef struct __attribute__((packed)) {
     int8_t   found_tag_ids[WIFI_MAX_FOUND_TAGS]; /* −1 = unused slot           */
 } wifi_cmd_pkt_t;
 
-#define CMD_GOTO    0x01
-#define CMD_LAND    0x02
-#define CMD_HOLD    0x03
+#define CMD_GOTO          0x01
+#define CMD_LAND          0x02
+#define CMD_HOLD          0x03
+#define CMD_SET_NAV_TAGS  0x04
+
+/* ---------------------------------------------------------------------------
+ * Navigation-tag position packet — received from laptop over UDP.
+ * Tells the drone where known AprilTags are in the map frame so it can
+ * correct its odometry when it detects them.
+ * --------------------------------------------------------------------------- */
+#define WIFI_MAX_NAV_TAGS   16
+
+typedef struct __attribute__((packed)) {
+    int8_t   id;            /* AprilTag ID                                  */
+    float    map_x;         /* NED north in map frame (m)                   */
+    float    map_y;         /* NED east  in map frame (m)                   */
+} wifi_nav_tag_entry_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t  pkt_type;      /* WIFI_PKT_CMD                                */
+    uint8_t  cmd_type;      /* CMD_SET_NAV_TAGS                            */
+    uint8_t  tag_count;     /* number of valid entries (≤ WIFI_MAX_NAV_TAGS)*/
+    wifi_nav_tag_entry_t tags[WIFI_MAX_NAV_TAGS];
+} wifi_nav_tags_pkt_t;
 
 /* ---------------------------------------------------------------------------
  * Lifecycle

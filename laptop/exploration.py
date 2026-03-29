@@ -17,7 +17,7 @@ from pathlib import Path
 import yaml
 
 from crumb_store import CrumbStore
-from protocol import VFH_BINS
+from protocol import VFH_BINS, NavTag
 
 _BIN_WIDTH_RAD = 2.0 * math.pi / VFH_BINS   # 11.25 deg
 
@@ -75,6 +75,15 @@ def extract_gaps(blocked: list[bool]) -> list[tuple[int, int]]:
 # Director
 # ------------------------------------------------------------------
 
+def load_nav_tags(config_path: str = "setup.yaml") -> list[NavTag]:
+    """Load navigation AprilTag positions from setup.yaml."""
+    cfg = yaml.safe_load(Path(config_path).read_text())
+    tags = []
+    for tag_id, pos in cfg.get("nav_tags", {}).items():
+        tags.append(NavTag(id=int(tag_id), map_x=pos["map_x"], map_y=pos["map_y"]))
+    return tags
+
+
 class ExplorationDirector:
     def __init__(self, crumb_store: CrumbStore, config_path: str = "setup.yaml"):
         cfg = yaml.safe_load(Path(config_path).read_text())
@@ -92,6 +101,9 @@ class ExplorationDirector:
         self._min_gap_bins   = exp.get("min_gap_bins", 2)
 
         self._store = crumb_store
+
+        # Load nav tags for callers that need them
+        self.nav_tags = load_nav_tags(config_path)
 
     def compute_goal(
         self,

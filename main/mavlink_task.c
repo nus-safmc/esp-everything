@@ -450,6 +450,32 @@ bool mavlink_position_valid(void)
     return (now - last) < 500;
 }
 
+void mavlink_send_vision_position(float x, float y, float z, uint64_t usec)
+{
+    mavlink_message_t msg;
+    float covariance[21];
+    memset(covariance, 0, sizeof(covariance));
+    /* Diagonal = NaN → PX4 uses EKF2_EVP_NOISE parameter instead */
+    covariance[0]  = NAN;   /* var(x)  */
+    covariance[6]  = NAN;   /* var(y)  */
+    covariance[11] = NAN;   /* var(z)  */
+    covariance[15] = NAN;   /* var(roll)  */
+    covariance[18] = NAN;   /* var(pitch) */
+    covariance[20] = NAN;   /* var(yaw)   */
+
+    mavlink_msg_vision_position_estimate_pack(
+        OBC_SYSID,
+        OBC_COMPID,
+        &msg,
+        usec,
+        x, y, z,
+        NAN, NAN, NAN,     /* roll, pitch, yaw — not provided */
+        covariance,
+        0                   /* reset_counter */
+    );
+    send_message(&msg);
+}
+
 // ---------------------------------------------------------------------------
 // FreeRTOS task
 // ---------------------------------------------------------------------------

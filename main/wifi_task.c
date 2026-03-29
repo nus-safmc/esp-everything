@@ -3,6 +3,7 @@
 #include "nav_task.h"
 #include "breadcrumb.h"
 #include "at_detect.h"
+#include "odom.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -102,6 +103,33 @@ static void handle_command(const wifi_cmd_pkt_t *cmd)
     }
 }
 
+/* Parse and apply a CMD_SET_NAV_TAGS packet */
+static void handle_nav_tags(const uint8_t *buf, int len)
+{
+    if (len < 3) return;
+    uint8_t tag_count = buf[2];
+    if (tag_count > WIFI_MAX_NAV_TAGS) tag_count = WIFI_MAX_NAV_TAGS;
+
+    int expected = 3 + tag_count * (int)sizeof(wifi_nav_tag_entry_t);
+    if (len < expected) {
+        ESP_LOGW(TAG, "CMD_SET_NAV_TAGS truncated (%d < %d)", len, expected);
+        return;
+    }
+
+    /* Convert wire entries to odom nav_tag_t */
+    const wifi_nav_tag_entry_t *entries =
+        (const wifi_nav_tag_entry_t *)(buf + 3);
+
+    nav_tag_t tags[WIFI_MAX_NAV_TAGS];
+    for (int i = 0; i < tag_count; i++) {
+        tags[i].id    = entries[i].id;
+        tags[i].map_x = entries[i].map_x;
+        tags[i].map_y = entries[i].map_y;
+    }
+    odom_set_nav_tags(tags, tag_count);
+    ESP_LOGI(TAG, "CMD_SET_NAV_TAGS: %d tags received", tag_count);
+}
+
 /* ---------------------------------------------------------------------------
  * wifi_task — 10 Hz telemetry loop + non-blocking command receive
  * --------------------------------------------------------------------------- */
@@ -139,10 +167,14 @@ void wifi_task(void *arg)
     while (1) {
         /* ---- Check for incoming commands (non-blocking) ---- */
         {
-            wifi_cmd_pkt_t cmd;
-            int len = recvfrom(rx_sock, &cmd, sizeof(cmd), 0, NULL, NULL);
-            if (len >= (int)sizeof(cmd) && cmd.pkt_type == WIFI_PKT_CMD) {
-                handle_command(&cmd);
+            uint8_t cmd_buf[256];
+            int len = recvfrom(rx_sock, cmd_buf, sizeof(cmd_buf), 0, NULL, NULL);
+            if (len >= 2 && cmd_buf[0] == WIFI_PKT_CMD) {
+                if (cmd_buf[1] == CMD_SET_NAV_TAGS) {
+                    handle_nav_tags(cmd_buf, len);
+                } else if (len >= (int)sizeof(wifi_cmd_pkt_t)) {
+                    handle_command((const wifi_cmd_pkt_t *)cmd_buf);
+                }
             }
         }
 

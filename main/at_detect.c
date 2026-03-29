@@ -23,6 +23,8 @@
 #include "freertos/task.h"
 
 #include "at_detect.h"
+#include "odom.h"
+#include "mavlink_task.h"
 
 #include "freertos/semphr.h"
 
@@ -329,6 +331,36 @@ void at_detect_task(void* pvParams)
 
           if (det->hamming > 1 || det->decision_margin <= 40.0) continue;
 
+          /* Pose estimation info — shared by both nav and landing paths */
+          apriltag_detection_info_t info = {
+            .det     = det,
+            .tagsize = TAG_SIZE,
+            .fx = F_X, .fy = F_Y,
+            .cx = C_X, .cy = C_Y,
+          };
+
+          /* ---- Navigation tag → odometry correction (no landing) ---- */
+          nav_tag_t nav;
+          if (odom_find_nav_tag(det->id, &nav)) {
+              apriltag_pose_t pose;
+              double err = estimate_tag_pose(&info, &pose);
+              if (err < 0.5) {
+                  drone_state_t drone = mavlink_get_state();
+                  odom_on_tag_seen(det->id,
+                      (float)MATD_EL(pose.t, 0, 0),
+                      (float)MATD_EL(pose.t, 1, 0),
+                      (float)MATD_EL(pose.t, 2, 0),
+                      drone.heading);
+              } else {
+                  ESP_LOGW(TAG, "Nav tag %d pose error too high (%.3f)", det->id, err);
+              }
+              matd_destroy(pose.R);
+              matd_destroy(pose.t);
+              continue;   /* nav tags never trigger landing */
+          }
+
+          /* ---- Landing tag — existing behaviour ---- */
+
           /* Skip tags the fleet already found (unless it's our own) */
           if (s_my_tag_id >= 0 && det->id != s_my_tag_id) continue;
           if (s_my_tag_id < 0 && tag_is_known(det->id)) {
@@ -339,13 +371,6 @@ void at_detect_task(void* pvParams)
           ESP_LOGI(TAG, "Apriltag found! ID=%d, DM=%f, hamming=%d", det->id, det->decision_margin, det->hamming);
           s_last_tag_id = det->id;
 
-          /* --- Pose estimation (was commented out) --- */
-          apriltag_detection_info_t info = {
-            .det     = det,
-            .tagsize = TAG_SIZE,
-            .fx = F_X, .fy = F_Y,
-            .cx = C_X, .cy = C_Y,
-          };
           apriltag_pose_t pose;
           double err = estimate_tag_pose(&info, &pose);
 

@@ -8,6 +8,7 @@ idf_component_register(
         "at_detect.c"
         "breadcrumb.c"
         "wifi_task.c"
+        "odom.c"
     INCLUDE_DIRS "."
     REQUIRES
         mavlink

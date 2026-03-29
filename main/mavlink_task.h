@@ -112,3 +112,13 @@ drone_state_t mavlink_get_state(void);
 
 // Convenience: true if we have received position data recently (< 500ms)
 bool mavlink_position_valid(void);
+
+// ---------------------------------------------------------------------------
+// External vision position — sent to PX4 EKF2 for odometry correction
+// ---------------------------------------------------------------------------
+
+// Send VISION_POSITION_ESTIMATE to PX4.
+// x, y, z: position in the vision/map reference frame (NED, metres).
+// usec: timestamp in microseconds (esp_timer_get_time()).
+// PX4 fuses this with IMU when EKF2_EV_CTRL is configured.
+void mavlink_send_vision_position(float x, float y, float z, uint64_t usec);

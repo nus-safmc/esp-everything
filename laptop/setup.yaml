@@ -1,7 +1,16 @@
 # Drone fleet configuration
-# start_x / start_y: NED position where the drone powers on (arena frame, metres)
-# These offsets are added to each drone's local NED crumbs/positions to
-# transform them into the shared map frame.
+#
+# Map frame (NED):
+#   Origin: a fixed point in the arena (e.g. a corner or centre).
+#   X = North, Y = East, Z = Down.
+#   All positions below are in this frame.
+#
+# The map frame is anchored by navigation AprilTags at surveyed positions.
+# When a drone sees a nav tag, it corrects its PX4 odometry via
+# VISION_POSITION_ESTIMATE, making PX4's local NED converge to map frame.
+#
+# start_x / start_y: where each drone powers on in map frame (metres).
+# Used by the laptop for crumb transforms before the first vision fix.
 
 drones:
   0:
@@ -17,7 +26,7 @@ drones:
     start_x: 0.0
     start_y: 1.5
 
-# Unknown area bounds (map frame, metres).
+# Arena bounds (map frame, metres).
 # Goals are clamped inside this rectangle.
 arena:
   min_x: 0.0
@@ -33,6 +42,22 @@ stuck:
   stuck_zone_ttl_s:     60.0   # how long stuck zones persist
   retreat_dist_m:        1.5   # fallback retreat distance when fully blocked
 
+# Navigation AprilTags at known map-frame positions.
+# These are sent to the drones at startup via CMD_SET_NAV_TAGS.
+# The drone uses them for odometry correction — NOT for landing.
+#
+# Key = AprilTag ID (tag16h5 family), value = map-frame position.
+# Survey these positions carefully — odometry accuracy depends on it.
+nav_tags:
+  10: {map_x: 1.0, map_y: 0.0}
+  11: {map_x: 3.0, map_y: 0.0}
+  12: {map_x: 5.0, map_y: 0.0}
+  13: {map_x: 1.0, map_y: 3.0}
+  14: {map_x: 3.0, map_y: 3.0}
+  15: {map_x: 5.0, map_y: 3.0}
+  16: {map_x: 1.0, map_y: 6.0}
+  17: {map_x: 3.0, map_y: 6.0}
+  18: {map_x: 5.0, map_y: 6.0}
 # Exploration parameters
 exploration:
   goal_distance: 2.0       # project goal this far ahead (m)

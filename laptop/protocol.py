@@ -19,9 +19,10 @@ from typing import Optional
 PKT_TELEM   = 0x01   # telemetry from drone
 PKT_CMD     = 0x02   # command to drone
 
-CMD_GOTO    = 0x01   # navigate to (goal_x, goal_y)
-CMD_LAND    = 0x02   # land immediately
-CMD_HOLD    = 0x03   # hold position, cancel goal
+CMD_GOTO          = 0x01   # navigate to (goal_x, goal_y)
+CMD_LAND          = 0x02   # land immediately
+CMD_HOLD          = 0x03   # hold position, cancel goal
+CMD_SET_NAV_TAGS  = 0x04   # send navigation tag map positions to drone
 
 VFH_BINS    = 32
 MAX_CRUMBS_PKT = 10
@@ -141,3 +142,36 @@ def build_command(cmd: CommandPacket) -> bytes:
     tag_ids = (cmd.found_tag_ids + [-1] * MAX_FOUND_TAGS)[:MAX_FOUND_TAGS]
     return struct.pack(_CMD_FMT, PKT_CMD, cmd.cmd_type,
                        cmd.goal_x, cmd.goal_y, *tag_ids)
+
+
+# ---------------------------------------------------------------------------
+# Navigation-tag position packet  (laptop → drone)
+# ---------------------------------------------------------------------------
+
+MAX_NAV_TAGS = 16
+
+# Wire format per tag entry: int8_t id + float map_x + float map_y
+_NAV_TAG_ENTRY_FMT = "<bff"
+_NAV_TAG_ENTRY_SIZE = struct.calcsize(_NAV_TAG_ENTRY_FMT)  # 9 bytes
+
+
+@dataclass
+class NavTag:
+    """A navigation AprilTag at a known map-frame position."""
+    id:    int      # AprilTag ID
+    map_x: float    # NED north in map frame (m)
+    map_y: float    # NED east  in map frame (m)
+
+
+def build_nav_tags_command(tags: list[NavTag]) -> bytes:
+    """
+    Build a CMD_SET_NAV_TAGS packet.
+
+    tags: list of NavTag (up to MAX_NAV_TAGS).
+    Returns bytes ready to send over UDP.
+    """
+    count = min(len(tags), MAX_NAV_TAGS)
+    buf = struct.pack("<BBB", PKT_CMD, CMD_SET_NAV_TAGS, count)
+    for t in tags[:count]:
+        buf += struct.pack(_NAV_TAG_ENTRY_FMT, t.id, t.map_x, t.map_y)
+    return buf
