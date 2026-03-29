@@ -434,6 +434,6 @@ void nav_task(void *arg)
 
     while (1) {
         nav_tick(&vfh_cfg);
-        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(50));
     }
 }

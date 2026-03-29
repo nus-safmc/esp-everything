@@ -299,7 +299,7 @@ void at_detect_task(void* pvParams)
     // With quad_sigma = 1.0 and quad_decimate = 4.0, ESP32-CAM can detect 16h5 tag
     // from the distance of about 1 meter (tested with tag on screen. not on paper)
     td->quad_sigma = 1.0;
-    td->quad_decimate = 2.0;//6.0;//5.0;
+    td->quad_decimate = 1.5;//6.0;//5.0;
     td->refine_edges = 1;
     td->decode_sharpening = 0.75;
     td->nthreads = 1;
@@ -333,7 +333,7 @@ void at_detect_task(void* pvParams)
           apriltag_detection_t *det;
           zarray_get(at_detections, i, &det);
 
-          if (det->hamming > 1 || det->decision_margin <= 40.0) continue;
+          if (det->hamming > 1 || det->decision_margin <= 55.0) continue;
 
           /* Pose estimation info — shared by both nav and landing paths */
           apriltag_detection_info_t info = {
