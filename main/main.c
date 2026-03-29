@@ -129,6 +129,7 @@ static void mission_task(void *arg)
     /* Goals arrive via CMD_GOTO from the laptop (handled in wifi_task).  */
     /* This loop just monitors for landing triggers.                       */
     /* ------------------------------------------------------------------ */
+explore_loop:
     nav_goal_active = true;   /* wifi_task owns nav goals from here */
     ESP_LOGI(TAG, "Exploration mode — waiting for laptop goals...");
 
@@ -138,13 +139,14 @@ static void mission_task(void *arg)
             wifi_clear_land_request();
             ESP_LOGI(TAG, "CMD_LAND received from laptop");
             nav_goal_active = false;
-            break;
+            goto do_land;
         }
         vTaskDelay(pdMS_TO_TICKS(200));
     }
 
     /* ------------------------------------------------------------------ */
-    /* Phase 6a: Fly to tag position (one-shot from last detection)        */
+    /* Phase 6a: Fly to tag position, refreshing pose on each detection   */
+    /* Times out after 60 s and returns to exploration.                    */
     /* ------------------------------------------------------------------ */
 precision_landing:
     ESP_LOGI(TAG, "Precision landing: tag %d", at_detect_last_id());
@@ -156,44 +158,75 @@ precision_landing:
     vTaskDelay(pdMS_TO_TICKS(200));
 
     {
-        /* Compute tag odom position from the detection-time snapshot.
-         * pose.drone_x/y/heading are captured at the moment the tag was
-         * detected, so the camera-to-NED offset is applied to the correct
-         * drone position, not the (potentially different) current one. */
-        at_detect_pose_t pose  = at_detect_get_pose();
-        drone_state_t    drone = mavlink_get_state();
+#define PRECISION_TIMEOUT_MS  60000
+#define POSE_UPDATE_THRESH_M  0.15f
 
-        float tag_x = drone.x;
-        float tag_y = drone.y;
+        uint32_t pl_start_ms  = (uint32_t)(esp_timer_get_time() / 1000);
+        uint32_t last_detect_ms = 0;
+        float    goal_x = mavlink_get_state().x;
+        float    goal_y = mavlink_get_state().y;
 
-        if (pose.valid) {
-            float dn, de, hdist;
-            camera_to_ned(pose.tx, pose.ty, pose.tz, pose.drone_heading,
-                          &dn, &de, &hdist);
-            tag_x = pose.drone_x + dn;
-            tag_y = pose.drone_y + de;
-            ESP_LOGI(TAG, "Tag at odom (%.2f, %.2f), hdist=%.2f m", tag_x, tag_y, hdist);
-        } else {
-            ESP_LOGW(TAG, "No valid pose — landing in place");
+        /* Seed goal from first available pose */
+        {
+            at_detect_pose_t p0 = at_detect_get_pose();
+            if (p0.valid) {
+                float dn, de, hdist;
+                camera_to_ned(p0.tx, p0.ty, p0.tz, p0.drone_heading,
+                              &dn, &de, &hdist);
+                goal_x = p0.drone_x + dn;
+                goal_y = p0.drone_y + de;
+                last_detect_ms = p0.detect_ms;
+                ESP_LOGI(TAG, "Initial tag odom (%.2f, %.2f), hdist=%.2f m",
+                         goal_x, goal_y, hdist);
+            } else {
+                ESP_LOGW(TAG, "No valid pose yet — will refine when tag seen");
+            }
         }
-
-        /* Fly to the tag position using nav_task (VFH+ obstacle avoidance) */
-        nav_set_goal_ned(tag_x, tag_y, target_z);
+        nav_set_goal_ned(goal_x, goal_y, target_z);
 
         for (;;) {
-            nav_state_t ns = nav_get_status().state;
-            if (ns == NAV_ARRIVED) {
+            /* Check timeout */
+            uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+            if ((now_ms - pl_start_ms) >= PRECISION_TIMEOUT_MS) {
+                ESP_LOGW(TAG, "Precision landing timed out — returning to exploration");
+                nav_cancel();
+                at_detect_reset_latch();
+                goto explore_loop;
+            }
+
+            /* Check for a fresh pose reading */
+            at_detect_pose_t pose = at_detect_get_pose();
+            if (pose.valid && pose.detect_ms != last_detect_ms) {
+                last_detect_ms = pose.detect_ms;
+                float dn, de, hdist;
+                camera_to_ned(pose.tx, pose.ty, pose.tz, pose.drone_heading,
+                              &dn, &de, &hdist);
+                float new_x = pose.drone_x + dn;
+                float new_y = pose.drone_y + de;
+                float dx = new_x - goal_x;
+                float dy = new_y - goal_y;
+                if (sqrtf(dx*dx + dy*dy) > POSE_UPDATE_THRESH_M) {
+                    goal_x = new_x;
+                    goal_y = new_y;
+                    nav_set_goal_ned(goal_x, goal_y, target_z);
+                    ESP_LOGI(TAG, "Pose updated → odom (%.2f, %.2f), hdist=%.2f m",
+                             goal_x, goal_y, hdist);
+                }
+            }
+
+            if (nav_get_status().state == NAV_ARRIVED) {
                 ESP_LOGI(TAG, "Above tag — landing");
+                nav_cancel();
                 break;
             }
             vTaskDelay(pdMS_TO_TICKS(100));
         }
-        nav_cancel();
     }
 
     /* ------------------------------------------------------------------ */
     /* Phase 6b: Land                                                       */
     /* ------------------------------------------------------------------ */
+do_land:
     mavlink_send_land_command();
     ESP_LOGI(TAG, "Land command sent (tag %d)", at_detect_last_id());
 

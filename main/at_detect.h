@@ -26,6 +26,9 @@ bool at_detect_land_requested(void);
 void at_detect_clear_land_request(void);
 int at_detect_last_id(void);
 
+/* Reset the latched tag so a new tag can be found during re-exploration. */
+void at_detect_reset_latch(void);
+
 /* Latched tag ID this drone found (−1 if none yet). Set once, never overwritten. */
 int8_t at_detect_my_tag_id(void);
 
@@ -40,9 +43,10 @@ typedef struct {
     float tx, ty, tz;   /* translation from camera origin to tag centre */
     bool  valid;        /* true only when a low-error estimate exists    */
     int   tag_id;
-    float drone_x;      /* drone odom position at time of detection     */
-    float drone_y;
-    float drone_heading; /* drone heading at time of detection (rad)    */
+    float    drone_x;      /* drone odom position at time of detection     */
+    float    drone_y;
+    float    drone_heading; /* drone heading at time of detection (rad)    */
+    uint32_t detect_ms;    /* esp_timer milliseconds at detection time     */
 } at_detect_pose_t;
 
 /* Thread-safe snapshot of the latest pose estimate.

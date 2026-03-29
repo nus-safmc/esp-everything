@@ -1,5 +1,6 @@
 #include <esp_log.h>
 #include <esp_system.h>
+#include "esp_timer.h"
 #include <nvs_flash.h>
 #include <stdio.h>
 #include <sys/param.h>
@@ -214,6 +215,15 @@ void at_detect_clear_land_request(void)
   s_land_requested = false;
 }
 
+void at_detect_reset_latch(void)
+{
+    s_my_tag_id      = -1;
+    s_land_requested = false;
+    xSemaphoreTake(s_pose_mutex, portMAX_DELAY);
+    s_pose.valid = false;
+    xSemaphoreGive(s_pose_mutex);
+}
+
 int at_detect_last_id(void)
 {
   return s_last_tag_id;
@@ -389,14 +399,15 @@ void at_detect_task(void* pvParams)
           if (err < 0.5) {
             drone_state_t det_drone = mavlink_get_state();
             xSemaphoreTake(s_pose_mutex, portMAX_DELAY);
-            s_pose.tx    = (float)MATD_EL(pose.t, 0, 0);
-            s_pose.ty    = (float)MATD_EL(pose.t, 1, 0);
-            s_pose.tz    = (float)MATD_EL(pose.t, 2, 0);
-            s_pose.valid = true;
-            s_pose.tag_id = det->id;
-            s_pose.drone_x = det_drone.x;
-            s_pose.drone_y = det_drone.y;
+            s_pose.tx           = (float)MATD_EL(pose.t, 0, 0);
+            s_pose.ty           = (float)MATD_EL(pose.t, 1, 0);
+            s_pose.tz           = (float)MATD_EL(pose.t, 2, 0);
+            s_pose.valid        = true;
+            s_pose.tag_id       = det->id;
+            s_pose.drone_x      = det_drone.x;
+            s_pose.drone_y      = det_drone.y;
             s_pose.drone_heading = det_drone.heading;
+            s_pose.detect_ms    = (uint32_t)(esp_timer_get_time() / 1000);
             xSemaphoreGive(s_pose_mutex);
 
             if (!s_land_requested) {
