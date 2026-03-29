@@ -19,11 +19,16 @@
  * Bootstrapping
  * -------------
  *   Initialised to each drone's known start position in map frame (sent by
- *   laptop via CMD_SET_NAV_TAGS).  Refined on every nav-tag sighting:
+ *   laptop via CMD_SET_NAV_TAGS).  Refined on every nav-tag sighting using
+ *   the full pose (rotation + translation) from the AprilTag detector:
  *
- *     inferred_odom = tag_odom_pos − camera_to_ned_offset
- *     drift         = inferred_odom − PX4_odom
- *     map_T_odom    = start_offset + drift
+ *     cam_in_tag  = −R^T · t          (camera pos in tag frame)
+ *     inferred    = tag_odom + R_tag_to_ned · cam_in_tag
+ *     drift       = inferred − PX4_odom
+ *     map_T_odom  = start_offset + drift
+ *
+ *   Tag orientation assumption: top of every nav tag points north.
+ *   Tag frame: X = east, Y = north, Z = up.
  *
  * Nav-tag positions are stored in *odom* frame (map − start_offset),
  * pre-computed by the laptop.  PX4's odom frame is never modified.
@@ -54,11 +59,12 @@ void odom_set_nav_tags(const nav_tag_t *tags, int count);
 bool odom_find_nav_tag(int tag_id, nav_tag_t *out);
 
 /* Called when a nav tag is detected with a valid pose estimate.
- *   tag_id   : must be in the nav table
- *   tx,ty,tz : pose in camera frame (OpenCV: X=right, Y=down, Z=fwd)
- *   heading  : current drone heading (NED rad, 0=North, CW+)
+ *   tag_id      : must be in the nav table
+ *   cam_tag_x/y : camera position in the tag coordinate frame (= −R^T · t)
+ *                 Tag frame: X = east, Y = north (tag top = north)
+ * Heading-independent — uses the tag's known orientation, not the IMU.
  * Refines map_T_odom from the observation.  Thread-safe. */
-void odom_on_tag_seen(int tag_id, float tx, float ty, float tz, float heading);
+void odom_on_tag_seen(int tag_id, float cam_tag_x, float cam_tag_y);
 
 /* ---------------------------------------------------------------------------
  * Frame conversion  (thread-safe, use current map_T_odom)

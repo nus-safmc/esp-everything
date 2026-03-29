@@ -1,5 +1,4 @@
 #include "odom.h"
-#include "at_detect.h"      /* camera_to_ned() */
 #include "mavlink_task.h"   /* mavlink_get_state() */
 
 #include "freertos/FreeRTOS.h"
@@ -96,35 +95,34 @@ bool odom_find_nav_tag(int tag_id, nav_tag_t *out)
 /* ---------------------------------------------------------------------------
  * Transform refinement on tag sighting
  *
- *   tag positions are in odom frame  (= map − start_offset, pre-computed
- *   by laptop so the drone never needs to know the map positions directly)
+ *   cam_tag_x/y = camera position in the tag coordinate frame (= −R^T · t),
+ *   computed by at_detect from the full pose (R + t).
  *
- *   inferred_odom = tag_odom − camera_to_ned_offset   (where I really am)
- *   drift         = inferred_odom − PX4_odom          (accumulated error)
- *   map_T_odom    = start_offset + drift              (updated transform)
+ *   Tag frame:  X = east,  Y = north,  Z = up  (tag on floor, top = north)
+ *   Odom/NED:   X = north, Y = east,   Z = down
+ *
+ *   inferred_odom_x = tag_odom_x + cam_tag_y   (tag Y → north)
+ *   inferred_odom_y = tag_odom_y + cam_tag_x   (tag X → east)
+ *   drift           = inferred_odom − PX4_odom
+ *   map_T_odom      = start_offset + drift
+ *
+ * Heading-independent: the tag's known world orientation replaces the
+ * IMU heading, eliminating ring ambiguity from magnetometer drift.
  * --------------------------------------------------------------------------- */
 
-void odom_on_tag_seen(int tag_id, float tx, float ty, float tz, float heading)
+void odom_on_tag_seen(int tag_id, float cam_tag_x, float cam_tag_y)
 {
     nav_tag_t nav;
     if (!odom_find_nav_tag(tag_id, &nav)) return;
 
-    /* NED offset from drone to tag in odom frame */
-    float dn, de, hdist;
-    camera_to_ned(tx, ty, tz, heading, &dn, &de, &hdist);
+    /* Tag→NED axis mapping: tag_Y → odom north, tag_X → odom east */
+    float inferred_odom_x = nav.x + cam_tag_y;
+    float inferred_odom_y = nav.y + cam_tag_x;
 
-    /* Inferred odom position from the tag measurement */
-    float inferred_odom_x = nav.x - dn;
-    float inferred_odom_y = nav.y - de;
-
-    /* Current PX4 odom estimate */
     drone_state_t state = mavlink_get_state();
-
-    /* Drift = difference between measurement and PX4 estimate */
     float drift_x = inferred_odom_x - state.x;
     float drift_y = inferred_odom_y - state.y;
 
-    /* Refined map_T_odom = start_offset + accumulated drift */
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     float new_offset_x = s_start_x + drift_x;
     float new_offset_y = s_start_y + drift_y;
@@ -133,9 +131,10 @@ void odom_on_tag_seen(int tag_id, float tx, float ty, float tz, float heading)
     xSemaphoreGive(s_mutex);
 
     ESP_LOGI(TAG, "map_T_odom refined: tag %d  "
-                  "inferred_odom(%.2f,%.2f)  px4_odom(%.2f,%.2f)  "
-                  "drift(%.3f,%.3f)  new_offset(%.2f,%.2f)",
+                  "cam_in_tag(%.2f,%.2f)  inferred_odom(%.2f,%.2f)  "
+                  "px4_odom(%.2f,%.2f)  drift(%.3f,%.3f)  offset(%.2f,%.2f)",
              tag_id,
+             cam_tag_x, cam_tag_y,
              inferred_odom_x, inferred_odom_y,
              state.x, state.y,
              drift_x, drift_y,

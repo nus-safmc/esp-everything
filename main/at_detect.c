@@ -349,12 +349,19 @@ void at_detect_task(void* pvParams)
               apriltag_pose_t pose;
               double err = estimate_tag_pose(&info, &pose);
               if (err < 0.5) {
-                  drone_state_t drone = mavlink_get_state();
-                  odom_on_tag_seen(det->id,
-                      (float)MATD_EL(pose.t, 0, 0),
-                      (float)MATD_EL(pose.t, 1, 0),
-                      (float)MATD_EL(pose.t, 2, 0),
-                      drone.heading);
+                  /* cam_in_tag = -R^T * t  (camera position in tag frame) */
+                  float tx = (float)MATD_EL(pose.t, 0, 0);
+                  float ty = (float)MATD_EL(pose.t, 1, 0);
+                  float tz = (float)MATD_EL(pose.t, 2, 0);
+                  float r00 = (float)MATD_EL(pose.R, 0, 0);
+                  float r10 = (float)MATD_EL(pose.R, 1, 0);
+                  float r20 = (float)MATD_EL(pose.R, 2, 0);
+                  float r01 = (float)MATD_EL(pose.R, 0, 1);
+                  float r11 = (float)MATD_EL(pose.R, 1, 1);
+                  float r21 = (float)MATD_EL(pose.R, 2, 1);
+                  float cam_tag_x = -(r00 * tx + r10 * ty + r20 * tz);
+                  float cam_tag_y = -(r01 * tx + r11 * ty + r21 * tz);
+                  odom_on_tag_seen(det->id, cam_tag_x, cam_tag_y);
               } else {
                   ESP_LOGW(TAG, "Nav tag %d pose error too high (%.3f)", det->id, err);
               }
