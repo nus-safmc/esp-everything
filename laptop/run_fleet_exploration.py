@@ -26,6 +26,7 @@ from comms import CommsNode
 from crumb_store import CrumbStore
 from exploration import ExplorationDirector
 from visualise import Visualiser
+from vfh_logger import VfhLogger
 from protocol import (
     CMD_GOTO, CMD_LAND, CMD_START, CommandPacket,
     NAV_IDLE, NAV_ARRIVED, NAV_STUCK,
@@ -54,10 +55,11 @@ def main():
     # --- Initialise components ---
     store    = CrumbStore()
     director = ExplorationDirector(store, args.config)
+    vfh_log  = VfhLogger()
     comms    = CommsNode(listen_port=args.telem_port, cmd_port=args.cmd_port,
                          config_path=args.config)
 
-    GOAL_INTERVAL = 1.0 # seconds between goal updates per drone
+    GOAL_INTERVAL = 2.5 # seconds between goal updates per drone
 
     # Per-drone state
     last_goal_time: dict[int, float]              = {d: 0.0 for d in drone_ids}
@@ -75,16 +77,11 @@ def main():
 
         did = pkt.drone_id
 
-        # --- Ingest crumbs ---
-        if pkt.crumbs:
-            store.add_crumbs(
-                drone_id=did,
-                crumbs=pkt.crumbs,
-                start_index=pkt.crumb_batch_start,
-            )
-
-        map_x, map_y = pkt.ned_x, pkt.ned_y
         drone_state[did] = pkt
+        map_x, map_y = pkt.ned_x, pkt.ned_y
+
+        # --- Record position into density grid ---
+        store.add_position(did, map_x, map_y)
         now = time.monotonic()
 
         # --- Periodic status log (every 2 s, all drones) ---
@@ -123,9 +120,10 @@ def main():
                 last_goal_time[did] = now
 
     comms.on_telemetry(on_telemetry)
+    comms.on_telemetry(vfh_log.feed)
 
     # --- Visualiser (fed via callback, no separate socket) ---
-    vis = Visualiser(args.config)
+    vis = Visualiser(store, args.config)
     comms.on_telemetry(vis.feed)
 
     # --- Ctrl+C handler ---
@@ -184,6 +182,7 @@ def main():
         log.info("Sending CMD_LAND to all drones")
         comms.send_all(CommandPacket(CMD_LAND))
         time.sleep(1.0)
+        vfh_log.stop()
         comms.stop()
 
         total_goals = sum(goal_counts.values())

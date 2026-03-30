@@ -65,16 +65,11 @@ def main():
         if pkt.drone_id != drone_id:
             return
 
-        # --- Ingest crumbs ---
-        if pkt.crumbs:
-            store.add_crumbs(
-                drone_id=pkt.drone_id,
-                crumbs=pkt.crumbs,
-                start_index=pkt.crumb_batch_start,
-            )
-
         # Telemetry position is already in map frame (converted on ESP32)
         map_x, map_y = pkt.ned_x, pkt.ned_y
+
+        # --- Record position into density grid ---
+        store.add_position(pkt.drone_id, map_x, map_y)
 
         # --- Periodic status log (every 2 s) ---
         now = time.monotonic()

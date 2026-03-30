@@ -18,7 +18,7 @@ drones:
     start_y: 0.0
   1:
     start_x: 0.0
-    start_y: 1.0
+    start_y: 2.6
   # 2:
   #   start_x: 0.0
   #   start_y: 1.0
@@ -29,15 +29,15 @@ drones:
 # Arena bounds (map frame, metres).
 # Goals are clamped inside this rectangle.
 arena:
-  min_x: -0.15
-  max_x: 2.5
-  min_y: -1.0
-  max_y: 3.0
+  min_x: -1.8
+  max_x: 8.2
+  min_y: -3.2
+  max_y: 6.8
 
 # Stuck detection and recovery
 stuck:
-  progress_threshold_m: 0.3   # movement less than this = no progress
-  stuck_timeout_s:       5.0   # no progress for this long = stuck
+  progress_threshold_m: 0.5   # movement less than this = no progress
+  stuck_timeout_s:       10.0   # no progress for this long = stuck
   stuck_zone_radius:     0.5   # radius of no-go zone marked at stuck location
   stuck_zone_ttl_s:     60.0   # how long stuck zones persist
   retreat_dist_m:        1.5   # fallback retreat distance when fully blocked
@@ -51,7 +51,7 @@ stuck:
 # Survey these positions carefully — odometry accuracy depends on it.
 nav_tags:
   10: {map_x: 1.0, map_y: -0.5}
-  11: {map_x: 2.0, map_y: 0.0}
+  # 11: {map_x: 2.0, map_y: 0.0}
   # 12: {map_x: 5.0, map_y: 0.0}
   # 13: {map_x: 1.0, map_y: 3.0}
   # 14: {map_x: 3.0, map_y: 3.0}
