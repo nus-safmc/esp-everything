@@ -426,13 +426,38 @@ nav_status_t nav_get_status(void)
 
 void nav_task(void *arg)
 {
-    vfh_config_t vfh_cfg    = VFH_DEFAULT_CONFIG;
-    TickType_t   last_wake  = xTaskGetTickCount();
+    vfh_config_t vfh_cfg         = VFH_DEFAULT_CONFIG;
+    TickType_t   last_wake        = xTaskGetTickCount();
+    TickType_t   wifi_discon_tick = 0;   /* 0 = link up; else tick of first drop */
+    bool         wifi_kill_sent   = false;
 
     ESP_LOGI(TAG, "Navigator started (%.1f m/s cruise, ±%.0f° yaw tol)",
              NAV_CRUISE_SPEED_MS, NAV_YAW_TOL_RAD * 180.0f / (float)M_PI);
 
     while (1) {
+        /* ---- WiFi link-loss killswitch ----
+         * If the link has been continuously down for >3 s while armed,
+         * cancel navigation and disarm immediately (motor cut / drop). */
+        if (!wifi_is_connected()) {
+            if (wifi_discon_tick == 0) {
+                wifi_discon_tick = xTaskGetTickCount();
+                ESP_LOGW(TAG, "WiFi link lost — disarming in 3 s if not restored");
+            } else if (!wifi_kill_sent &&
+                       (xTaskGetTickCount() - wifi_discon_tick) >= pdMS_TO_TICKS(3000) &&
+                       mavlink_get_state().armed) {
+                ESP_LOGE(TAG, "WiFi lost >3 s — motor kill (disarm)");
+                nav_cancel();
+                mavlink_arm(false);
+                wifi_kill_sent = true;
+            }
+        } else {
+            if (wifi_discon_tick != 0) {
+                ESP_LOGI(TAG, "WiFi link restored");
+                wifi_discon_tick = 0;
+                wifi_kill_sent   = false;
+            }
+        }
+
         nav_tick(&vfh_cfg);
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(50));
     }

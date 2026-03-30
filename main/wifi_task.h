@@ -18,6 +18,13 @@
 /* Packet type bytes */
 #define WIFI_PKT_TELEM       0x01
 #define WIFI_PKT_CMD         0x02
+#define WIFI_PKT_TOF_DEBUG   0x03   /* debug: raw front-sensor 8×8 frame */
+
+/* Separate UDP port for ToF debug stream so it doesn't conflict with comms.py */
+#define WIFI_TOF_DEBUG_PORT  5007
+
+/* Pixels per sensor frame (8×8 grid) — duplicated here to avoid pulling in tof_task.h */
+#define WIFI_TOF_DEBUG_PIXELS  64
 
 /* Command port (drone listens for laptop commands on this UDP port) */
 #define WIFI_CMD_PORT        5006
@@ -111,6 +118,19 @@ typedef struct {
 wifi_peer_list_t wifi_get_peers(void);
 
 /* ---------------------------------------------------------------------------
+ * ToF debug packet — sent at 10 Hz to WIFI_TOF_DEBUG_PORT.
+ * Contains the raw 8×8 distance + status grid for the front sensor only.
+ * --------------------------------------------------------------------------- */
+typedef struct __attribute__((packed)) {
+    uint8_t  pkt_type;                              /* WIFI_PKT_TOF_DEBUG           */
+    uint8_t  sensor_idx;                            /* TOF_FRONT_SENSOR_IDX         */
+    uint8_t  sensor_ok;                             /* 1 if sensor initialised      */
+    uint32_t timestamp_ms;                          /* frame timestamp from sensor  */
+    uint16_t distance_mm[WIFI_TOF_DEBUG_PIXELS];    /* raw distances, 0 = invalid   */
+    uint8_t  target_status[WIFI_TOF_DEBUG_PIXELS];  /* 5 = valid, 9 = valid-weak    */
+} wifi_tof_debug_pkt_t;
+
+/* ---------------------------------------------------------------------------
  * Lifecycle
  * --------------------------------------------------------------------------- */
 
@@ -134,3 +154,6 @@ bool wifi_start_requested(void);
 
 /* Clear the start-request flag (call after acting on it). */
 void wifi_clear_start_request(void);
+
+/* Returns true while the WiFi link is up (IP obtained, not disconnected). */
+bool wifi_is_connected(void);

@@ -4,6 +4,7 @@
 #include "breadcrumb.h"
 #include "at_detect.h"
 #include "odom.h"
+#include "tof_task.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -29,6 +30,7 @@ static const char *TAG = "wifi";
 
 static volatile bool s_land_requested  = false;
 static volatile bool s_start_requested = false;
+static volatile bool s_wifi_connected  = false;
 
 /* Peer drone positions (map frame), protected by s_peer_mutex */
 static wifi_peer_list_t   s_peers = { .count = 0 };
@@ -43,11 +45,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
                                int32_t event_id, void *data)
 {
     if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        s_wifi_connected = false;
         ESP_LOGW(TAG, "Disconnected — reconnecting...");
         esp_wifi_connect();
     } else if (base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *e = (ip_event_got_ip_t *)data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&e->ip_info.ip));
+        s_wifi_connected = true;
         xEventGroupSetBits(s_wifi_events, WIFI_CONNECTED_BIT);
     }
 }
@@ -212,6 +216,16 @@ void wifi_task(void *arg)
     inet_aton(CONFIG_HOST_IPV4_ADDR, &dest.sin_addr);
     connect(tx_sock, (struct sockaddr *)&dest, sizeof(dest));
 
+    /* ToF debug send socket */
+    int tof_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    configASSERT(tof_sock >= 0);
+    struct sockaddr_in tof_dest = {
+        .sin_family = AF_INET,
+        .sin_port   = htons(WIFI_TOF_DEBUG_PORT),
+    };
+    inet_aton(CONFIG_HOST_IPV4_ADDR, &tof_dest.sin_addr);
+    connect(tof_sock, (struct sockaddr *)&tof_dest, sizeof(tof_dest));
+
     /* Command receive socket (non-blocking) */
     int rx_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
     configASSERT(rx_sock >= 0);
@@ -292,8 +306,23 @@ void wifi_task(void *arg)
                         &pkt.crumb_batch[i].x, &pkt.crumb_batch[i].y);
         }
 
-        /* ---- Send ---- */
+        /* ---- Send telemetry ---- */
         send(tx_sock, &pkt, sizeof(pkt), 0);
+
+        /* ---- Send raw ToF debug frame (front sensor only) ---- */
+        {
+            tof_scan_t scan = tof_get_scan();
+            wifi_tof_debug_pkt_t dbg = {};
+            dbg.pkt_type    = WIFI_PKT_TOF_DEBUG;
+            dbg.sensor_idx  = TOF_FRONT_SENSOR_IDX;
+            dbg.sensor_ok   = scan.sensor_ok[TOF_FRONT_SENSOR_IDX];
+            dbg.timestamp_ms = scan.frame[TOF_FRONT_SENSOR_IDX].timestamp_ms;
+            memcpy(dbg.distance_mm,   scan.frame[TOF_FRONT_SENSOR_IDX].distance_mm,
+                   sizeof(dbg.distance_mm));
+            memcpy(dbg.target_status, scan.frame[TOF_FRONT_SENSOR_IDX].target_status,
+                   sizeof(dbg.target_status));
+            send(tof_sock, &dbg, sizeof(dbg), 0);
+        }
 
         if (n > 0) {
             crumb_mark_sent(next_to_send + n - 1);
@@ -321,4 +350,9 @@ bool wifi_start_requested(void)
 void wifi_clear_start_request(void)
 {
     s_start_requested = false;
+}
+
+bool wifi_is_connected(void)
+{
+    return s_wifi_connected;
 }
