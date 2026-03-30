@@ -13,8 +13,8 @@
 #define TOF_SDA_PIN             CONFIG_TCA_SDA_GPIO_PORT   // from menuconfig
 #define TOF_SCL_PIN             CONFIG_TCA_SCL_GPIO_PORT
 #define TCA_I2C_ADDR            0x70
-#define TOF_RANGING_FREQ_HZ     60
-#define TOF_MAX_VALID_MM        4000    // discard readings above this (sensor max is 4m)
+#define TOF_RANGING_FREQ_HZ     15
+#define TOF_MAX_VALID_MM        3000    // discard readings above this (sensor max is 4m)
 #define TOF_MIN_VALID_MM        50      // discard readings below this (sensor blind zone)
 
 // FreeRTOS placement — Core 0, below mavlink but above mission

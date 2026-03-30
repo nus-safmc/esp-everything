@@ -62,8 +62,8 @@ menu "Drone Configuration"
           Port to send apriltag messages to
 
     config DRONE_ID
-        int "Drone ID (0-3)"
-        range 0 3
+        int "Drone ID (0-30)"
+        range 0 30
         default 0
         help
           Unique identifier for this drone. Used in telemetry packets.

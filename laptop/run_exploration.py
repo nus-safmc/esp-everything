@@ -54,7 +54,7 @@ def main():
     goal_count    = 0
     last_log_time = 0.0
     last_goal_time = 0.0
-    GOAL_INTERVAL  = 0.5   # seconds between exploration goal updates
+    GOAL_INTERVAL  = 3.0   # seconds between exploration goal updates
 
     # Exploration gated by this flag — set after second user trigger
     exploring = False

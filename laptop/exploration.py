@@ -112,7 +112,19 @@ class ExplorationDirector:
         self._cone_half_angle = math.radians(exp.get("cone_half_angle_deg", 30))
         self._min_gap_bins   = exp.get("min_gap_bins", 2)
 
+        # Heading continuity: penalise large turns so the drone prefers
+        # to keep moving forward rather than looping back.
+        self._w_heading = exp.get("w_heading", 0.4)
+
+        # Peer goal repulsion: penalise directions that another drone is
+        # already heading toward (discourages clustering).
+        self._w_peer_goal     = exp.get("w_peer_goal", 0.6)
+        self._peer_goal_angle = math.radians(exp.get("peer_goal_angle_deg", 45))
+
         self._store = crumb_store
+
+        # Active goals per drone: {drone_id: map_bearing_rad}
+        self._active_goals: dict[int, float] = {}
 
         # Load nav tags for callers that need them
         self.nav_tags = load_nav_tags(config_path)
@@ -154,6 +166,22 @@ class ExplorationDirector:
                 half_angle_rad=self._cone_half_angle,
             )
 
+            # Heading continuity: penalise turning away from current heading.
+            # Normalised to [0, 1] where 0 = straight ahead, 1 = 180° turn.
+            heading_diff = abs((map_bearing - heading_rad + math.pi) % (2 * math.pi) - math.pi)
+            heading_cost = heading_diff / math.pi   # 0..1
+
+            # Peer goal repulsion: penalise if another drone is already
+            # heading in a similar direction from a nearby position.
+            peer_penalty = 0.0
+            for other_id, other_bearing in self._active_goals.items():
+                if other_id == drone_id:
+                    continue
+                diff = abs((map_bearing - other_bearing + math.pi) % (2 * math.pi) - math.pi)
+                if diff < self._peer_goal_angle:
+                    # Stronger penalty the more aligned the directions are
+                    peer_penalty += 1.0 - diff / self._peer_goal_angle
+
             # Add penalty for goals inside stuck zones
             stuck_penalty = 0.0
             if stuck_zones:
@@ -164,13 +192,19 @@ class ExplorationDirector:
                         stuck_penalty = 1e6   # effectively block this direction
                         break
 
-            score = density + stuck_penalty
+            score = (density
+                     + self._w_heading * heading_cost
+                     + self._w_peer_goal * peer_penalty
+                     + stuck_penalty)
             if score < best_score:
                 best_score   = score
                 best_bearing = map_bearing
 
         if best_bearing is None:
             return None
+
+        # Record this drone's chosen bearing for peer goal repulsion
+        self._active_goals[drone_id] = best_bearing
 
         gx = map_x + self._goal_dist * math.cos(best_bearing)
         gy = map_y + self._goal_dist * math.sin(best_bearing)

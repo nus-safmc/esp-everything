@@ -47,11 +47,12 @@ static esp_err_t tca_select(uint8_t port)
 }
 
 // ---------------------------------------------------------------------------
-// Compute minimum valid range (metres) from a stored tof_frame_t.
+// Compute minimum range (metres) from a stored tof_frame_t.
 //
-// Only pixels with target_status 5 (valid) or 9 (valid, weak signal) are
-// considered. Readings outside [TOF_MIN_VALID_MM, TOF_MAX_VALID_MM] are
-// clamped out. Returns INFINITY if no valid pixel exists.
+// Status 5/9: valid measurement — use reported distance.
+// Status 255: out of range (nothing there) — ignored.
+// Any other status: unreliable — treat as 0.3 m (conservative).
+// Returns INFINITY only if every pixel is status 255 or out-of-range.
 // ---------------------------------------------------------------------------
 static float frame_min_range_m(const tof_frame_t *f)
 {
@@ -62,10 +63,15 @@ static float frame_min_range_m(const tof_frame_t *f)
             uint8_t  status = f->target_status[i];
             uint16_t dist   = f->distance_mm[i];
 
-            if (status != 5 && status != 9) continue;
-            if (dist < TOF_MIN_VALID_MM || dist > TOF_MAX_VALID_MM) continue;
-
-            float m = (float)dist / 1000.0f;
+            float m;
+            if (status == 255) {
+                continue;
+            } else if (status == 5 || status == 9) {
+                if (dist < TOF_MIN_VALID_MM || dist > TOF_MAX_VALID_MM) continue;
+                m = (float)dist / 1000.0f;
+            } else {
+                m = 0.30f;
+            }
             if (m < min_m) min_m = m;
         }
     }
@@ -247,15 +253,24 @@ tof_scan_collapsed_t tof_get_collapsed_scan(void)
                 uint8_t  status = f->target_status[px];
                 uint16_t dist   = f->distance_mm[px];
 
-                if (status != 5 && status != 9) continue;
-                if (dist < TOF_MIN_VALID_MM || dist > TOF_MAX_VALID_MM) continue;
+                /* Status 255: out of range (nothing there) — leave INFINITY.
+                 * Status 5/9: valid measurement — use reported distance.
+                 * Anything else: unreliable — assume 0.3 m (conservative). */
+                float dist_m;
+                if (status == 255) {
+                    continue;   /* open space, INFINITY is correct */
+                } else if (status == 5 || status == 9) {
+                    if (dist < TOF_MIN_VALID_MM || dist > TOF_MAX_VALID_MM) continue;
+                    dist_m = (float)dist / 1000.0f;
+                } else {
+                    dist_m = 0.40f;  /* conservative fallback for error statuses */
+                }
 
                 float norm_angle = fmodf(angle_deg, 360.0f);
                 if (norm_angle < 0.0f) norm_angle += 360.0f;
                 int idx = (int)(norm_angle * (float)(TOF_SENSOR_COUNT * TOF_SENSOR_RESO) / 360.0f);
                 if (idx >= TOF_SENSOR_COUNT * TOF_SENSOR_RESO) idx = TOF_SENSOR_COUNT * TOF_SENSOR_RESO - 1;
 
-                float dist_m = (float)dist / 1000.0f;
                 if (dist_m < out.ranges[idx])
                     out.ranges[idx] = dist_m;
                 // printf("(%d: %zu)", idx, dist);
