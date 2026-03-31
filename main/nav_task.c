@@ -3,7 +3,7 @@
 #include "tof_task.h"
 #include "vfh.h"
 #include "wifi_task.h"
-#include "odom.h"
+#include "odom.h"       /* map_to_odom() — convert goal each tick */
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -25,7 +25,8 @@ static const char *TAG = "nav";
  * --------------------------------------------------------------------------- */
 typedef struct {
     nav_state_t state;
-    float goal_x, goal_y, goal_z;
+    float goal_map_x, goal_map_y;   /* goal in MAP frame (north, east)          */
+    float goal_z;                   /* NED down (negative = above ground)       */
     bool  has_goal;
     float prev_steering_rad;    /* VFH prev input for continuity                */
     uint32_t stuck_count;       /* lifetime stuck events                        */
@@ -235,9 +236,14 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
 
     drone_state_t drone = mavlink_get_state();
 
+    /* Convert goal from map frame to odom frame every tick so that
+     * relocalization corrections are picked up immediately. */
+    float goal_x, goal_y;
+    map_to_odom(nav.goal_map_x, nav.goal_map_y, &goal_x, &goal_y);
+
     /* ---- Horizontal distance to goal ---- */
-    float dx   = nav.goal_x - drone.x;
-    float dy   = nav.goal_y - drone.y;
+    float dx   = goal_x - drone.x;
+    float dy   = goal_y - drone.y;
     float dist = sqrtf(dx * dx + dy * dy);
 
     /* Altitude is held by PX4's own position controller via the Z-position
@@ -245,7 +251,7 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
 
     /* ---- Check arrival ---- */
     if (dist < NAV_ARRIVE_RADIUS_M) {
-        mavlink_set_position_ned(nav.goal_x, nav.goal_y, nav.goal_z, drone.heading);
+        mavlink_set_position_ned(goal_x, goal_y, nav.goal_z, drone.heading);
         ESP_LOGI(TAG, "Goal reached (dist=%.2f m)", dist);
 
         xSemaphoreTake(s_mutex, portMAX_DELAY);
@@ -358,8 +364,8 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
     s_nav.stuck_count       = new_stuck_count;
 
     s_status.state             = new_state;
-    s_status.goal_x            = nav.goal_x;
-    s_status.goal_y            = nav.goal_y;
+    s_status.goal_x            = nav.goal_map_x;
+    s_status.goal_y            = nav.goal_map_y;
     s_status.goal_z            = nav.goal_z;
     s_status.dist_to_goal      = dist;
     s_status.heading_error_rad = wrap_pi(goal_ned_angle - drone.heading);
@@ -385,12 +391,12 @@ void nav_task_init(void)
     configASSERT(s_mutex != NULL);
 }
 
-void nav_set_goal_ned(float gx, float gy, float gz)
+void nav_set_goal_map(float map_x, float map_y, float z)
 {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
-    s_nav.goal_x          = gx;
-    s_nav.goal_y          = gy;
-    s_nav.goal_z          = gz;
+    s_nav.goal_map_x      = map_x;
+    s_nav.goal_map_y      = map_y;
+    s_nav.goal_z          = z;
     s_nav.has_goal        = true;
     s_nav.state           = NAV_ROTATING;
     s_nav.prev_steering_rad = 0.0f;
@@ -400,7 +406,7 @@ void nav_set_goal_ned(float gx, float gy, float gz)
      * during the initial alignment rotation. */
     mavlink_set_hold();
 
-    ESP_LOGI(TAG, "Goal set: NED (%.2f, %.2f, %.2f)", gx, gy, gz);
+    ESP_LOGI(TAG, "Goal set: map (%.2f, %.2f) z=%.2f", map_x, map_y, z);
 }
 
 void nav_cancel(void)

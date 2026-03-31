@@ -31,7 +31,7 @@ static const char *TAG = "mission";
  *
  * Sequencing contract with nav_task:
  *   1. nav_task is idle (no goal) — mission_task owns the MAVLink setpoint
- *   2. nav_set_goal_ned() is called — nav_task takes over setpoints
+ *   2. nav_set_goal_map() is called — nav_task takes over setpoints
  *   3. nav_cancel() restores ownership to mission_task for landing
  * --------------------------------------------------------------------------- */
 static void mission_task(void *arg)
@@ -189,16 +189,18 @@ precision_landing:
                 float dn, de, hdist;
                 camera_to_ned(p0.tx, p0.ty, p0.tz, p0.drone_heading,
                               &dn, &de, &hdist);
-                goal_x = p0.drone_x + dn;
-                goal_y = p0.drone_y + de;
+                float odom_x = p0.drone_x + dn;
+                float odom_y = p0.drone_y + de;
+                odom_to_map(odom_x, odom_y, &goal_x, &goal_y);
                 last_detect_ms = p0.detect_ms;
-                ESP_LOGI(TAG, "Initial tag odom (%.2f, %.2f), hdist=%.2f m",
+                ESP_LOGI(TAG, "Initial tag map (%.2f, %.2f), hdist=%.2f m",
                          goal_x, goal_y, hdist);
             } else {
                 ESP_LOGW(TAG, "No valid pose yet — will refine when tag seen");
+                odom_to_map(goal_x, goal_y, &goal_x, &goal_y);
             }
         }
-        nav_set_goal_ned(goal_x, goal_y, target_z);
+        nav_set_goal_map(goal_x, goal_y, target_z);
 
         for (;;) {
             /* Check timeout */
@@ -217,15 +219,17 @@ precision_landing:
                 float dn, de, hdist;
                 camera_to_ned(pose.tx, pose.ty, pose.tz, pose.drone_heading,
                               &dn, &de, &hdist);
-                float new_x = pose.drone_x + dn;
-                float new_y = pose.drone_y + de;
-                float dx = new_x - goal_x;
-                float dy = new_y - goal_y;
+                float odom_x = pose.drone_x + dn;
+                float odom_y = pose.drone_y + de;
+                float map_x, map_y;
+                odom_to_map(odom_x, odom_y, &map_x, &map_y);
+                float dx = map_x - goal_x;
+                float dy = map_y - goal_y;
                 if (sqrtf(dx*dx + dy*dy) > POSE_UPDATE_THRESH_M) {
-                    goal_x = new_x;
-                    goal_y = new_y;
-                    nav_set_goal_ned(goal_x, goal_y, target_z);
-                    ESP_LOGI(TAG, "Pose updated → odom (%.2f, %.2f), hdist=%.2f m",
+                    goal_x = map_x;
+                    goal_y = map_y;
+                    nav_set_goal_map(goal_x, goal_y, target_z);
+                    ESP_LOGI(TAG, "Pose updated → map (%.2f, %.2f), hdist=%.2f m",
                              goal_x, goal_y, hdist);
                 }
             }

@@ -107,15 +107,10 @@ static void handle_command(const wifi_cmd_pkt_t *cmd)
         ESP_LOGI(TAG, "CMD_START");
         s_start_requested = true;
         break;
-    case CMD_GOTO: {
-        /* Goals arrive in map frame — convert to odom before passing to nav */
-        float odom_x, odom_y;
-        map_to_odom(cmd->goal_x, cmd->goal_y, &odom_x, &odom_y);
-        nav_set_goal_ned(odom_x, odom_y, -(WIFI_CRUISE_ALT_M));
-        ESP_LOGI(TAG, "CMD_GOTO map(%.2f,%.2f) → odom(%.2f,%.2f)",
-                 cmd->goal_x, cmd->goal_y, odom_x, odom_y);
+    case CMD_GOTO:
+        nav_set_goal_map(cmd->goal_x, cmd->goal_y, -(WIFI_CRUISE_ALT_M));
+        ESP_LOGI(TAG, "CMD_GOTO map(%.2f,%.2f)", cmd->goal_x, cmd->goal_y);
         break;
-    }
     case CMD_LAND:
         ESP_LOGI(TAG, "CMD_LAND");
         s_land_requested = true;

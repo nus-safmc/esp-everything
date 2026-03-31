@@ -42,8 +42,8 @@ typedef enum {
  * --------------------------------------------------------------------------- */
 typedef struct {
     nav_state_t state;
-    float       goal_x;              /* current goal NED north (m)               */
-    float       goal_y;              /* current goal NED east  (m)               */
+    float       goal_x;              /* current goal map-frame north (m)         */
+    float       goal_y;              /* current goal map-frame east  (m)         */
     float       goal_z;              /* current goal NED down  (m, negative AGL) */
     float       dist_to_goal;        /* horizontal distance remaining (m)        */
     float       heading_error_rad;   /* signed error toward goal, body frame     */
@@ -69,10 +69,11 @@ void nav_task(void *arg);
  * Control API  (thread-safe — safe to call from any task)
  * --------------------------------------------------------------------------- */
 
-/* Set a new goal in NED metres.
- *   goal_z: NED down (negative = above ground, e.g. -1.5 = 1.5 m AGL).
- * Resets state to NAV_ROTATING immediately. */
-void nav_set_goal_ned(float gx, float gy, float gz);
+/* Set a new goal in MAP frame (NED metres).
+ *   map_x, map_y: horizontal position in map frame.
+ *   z: NED down (negative = above ground, e.g. -1.5 = 1.5 m AGL).
+ * Converted to odom frame each nav tick so reloc corrections apply. */
+void nav_set_goal_map(float map_x, float map_y, float z);
 
 /* Cancel navigation — transitions to NAV_IDLE and commands position hold. */
 void nav_cancel(void);
