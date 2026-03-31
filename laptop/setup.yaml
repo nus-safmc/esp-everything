@@ -46,6 +46,9 @@ drones:
   18:
     start_x: -1.4
     start_y: 10.0
+  24:
+    start_x: -1.4
+    start_y: 11.4
 
 # Arena bounds (map frame, metres).
 # Goals are clamped inside this rectangle.
