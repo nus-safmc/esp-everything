@@ -40,20 +40,10 @@ static const char *TAG = "mav";
 //   11   : yaw_rate
 // ---------------------------------------------------------------------------
 
-// Velocity-only: use vx,vy,vz + yaw_rate — ignore position, accel, yaw
-// Bits set: pos(0-2)=0x007, accel(6-8)=0x1C0, yaw(10)=0x400
-// Bits clear: vel(3-5), yaw_rate(11)
-#define TYPEMASK_VELOCITY       (uint16_t)(0x007 | 0x1C0 | 0x400)   // 0x5C7
-
 // Position-only: use x,y,z + yaw — ignore velocity, accel, yaw_rate
 // Bits set: vel(3-5)=0x038, accel(6-8)=0x1C0, yaw_rate(11)=0x800
 // Bits clear: pos(0-2), yaw(10)
 #define TYPEMASK_POSITION       (uint16_t)(0x038 | 0x1C0 | 0x800)   // 0x9F8
-
-// Mixed XY-velocity + Z-position + yaw-position:
-//   Use: vx(3), vy(4), z(2), yaw(10)  → bits clear
-//   Ignore: x(0), y(1), vz(5), accel(6-8), yaw_rate(11)  → bits set
-#define TYPEMASK_VEL_XY_POS_Z  (uint16_t)(0x001 | 0x002 | 0x020 | 0x1C0 | 0x800)  // 0x9E3
 
 // ---------------------------------------------------------------------------
 // PX4 custom modes (needed for MAV_CMD_DO_SET_MODE)
@@ -64,18 +54,14 @@ static const char *TAG = "mav";
 // Internal setpoint state
 // ---------------------------------------------------------------------------
 typedef enum {
-    SP_VELOCITY,
     SP_POSITION,
-    SP_VEL_XY_POS_Z, // XY velocity + Z position + yaw_rate
     SP_HOLD           // position hold at last known location
 } sp_type_t;
 
 typedef struct {
     sp_type_t type;
-    float x,  y,  z;           // NED metres (position mode)
-    float vx, vy, vz;          // NED m/s    (velocity mode)
-    float yaw;                  // radians    (position mode, CW from North)
-    float yaw_rate;             // rad/s      (velocity mode)
+    float x, y, z;    // NED metres
+    float yaw;         // radians, CW from North
 } setpoint_t;
 
 // ---------------------------------------------------------------------------
@@ -83,14 +69,10 @@ typedef struct {
 // ---------------------------------------------------------------------------
 static setpoint_t    s_sp;
 static drone_state_t s_state;
-static uint32_t      s_sp_update_ms;   // timestamp of last setpoint update
 
 static SemaphoreHandle_t s_sp_mutex;
 static SemaphoreHandle_t s_state_mutex;
 
-// If no task updates the setpoint for this long, auto-switch to position hold.
-// Protects against nav_task crash leaving a stale velocity command.
-#define SP_STALE_TIMEOUT_MS  300
 
 // ---------------------------------------------------------------------------
 // MAVLink send helpers
@@ -137,84 +119,31 @@ static void send_heartbeat(void)
 // ---------------------------------------------------------------------------
 static void send_setpoint(void)
 {
-    // Snapshot under mutex — copy is cheap (28 bytes)
+    // Snapshot under mutex
     xSemaphoreTake(s_sp_mutex, portMAX_DELAY);
     setpoint_t sp = s_sp;
-    uint32_t sp_age_ms = (uint32_t)(esp_timer_get_time() / 1000) - s_sp_update_ms;
     xSemaphoreGive(s_sp_mutex);
 
-    // Safety watchdog: if a velocity setpoint hasn't been refreshed, auto-hold.
-    // This catches nav_task crashes that would leave a stale velocity command.
-    // Position/hold setpoints are inherently safe (drone stays in place).
-    if ((sp.type == SP_VELOCITY || sp.type == SP_VEL_XY_POS_Z)
-            && sp_age_ms > SP_STALE_TIMEOUT_MS) {
-        ESP_LOGW(TAG, "Setpoint stale (%lu ms) — auto hold", (unsigned long)sp_age_ms);
-        mavlink_set_hold();
-        // Re-snapshot after auto-hold
-        xSemaphoreTake(s_sp_mutex, portMAX_DELAY);
-        sp = s_sp;
-        xSemaphoreGive(s_sp_mutex);
-    }
+    // Position / hold mode: velocity and yaw_rate fields MUST be NaN.
+    // SP_HOLD sends NaN for yaw so PX4 keeps the current heading.
+    float yaw = (sp.type == SP_HOLD) ? NAN : sp.yaw;
 
     mavlink_message_t msg;
-
-    if (sp.type == SP_VELOCITY) {
-        // Velocity mode: position fields MUST be NaN, not 0.
-        // yaw field MUST be NaN — 0.0 commands North-facing (PX4 bug).
-        mavlink_msg_set_position_target_local_ned_pack(
-            OBC_SYSID,
-            OBC_COMPID,
-            &msg,
-            (uint32_t)(esp_timer_get_time() / 1000),    // time_boot_ms
-            PX4_SYSID,
-            PX4_COMPID,
-            MAV_FRAME_LOCAL_NED,
-            TYPEMASK_VELOCITY,
-            NAN, NAN, NAN,              // position  — ignored (type_mask)
-            sp.vx, sp.vy, sp.vz,        // velocity  — used
-            NAN, NAN, NAN,              // accel     — ignored
-            NAN,                        // yaw       — ignored (MUST be NaN)
-            sp.yaw_rate                 // yaw_rate  — used
-        );
-
-    } else if (sp.type == SP_VEL_XY_POS_Z) {
-        // Mixed mode: XY velocity + Z position + yaw position.
-        // Unused position axes (x,y) and velocity axis (vz) MUST be NaN.
-        mavlink_msg_set_position_target_local_ned_pack(
-            OBC_SYSID,
-            OBC_COMPID,
-            &msg,
-            (uint32_t)(esp_timer_get_time() / 1000),
-            PX4_SYSID,
-            PX4_COMPID,
-            MAV_FRAME_LOCAL_NED,
-            TYPEMASK_VEL_XY_POS_Z,
-            NAN, NAN, sp.z,             // x,y ignored; z used
-            sp.vx, sp.vy, NAN,          // vx,vy used; vz ignored
-            NAN, NAN, NAN,              // accel    — ignored
-            sp.yaw,                     // yaw      — used
-            NAN                         // yaw_rate — ignored
-        );
-
-    } else {
-        // Position / hold mode: velocity and yaw_rate fields MUST be NaN.
-        float yaw = (sp.type == SP_HOLD) ? NAN : sp.yaw;
-        mavlink_msg_set_position_target_local_ned_pack(
-            OBC_SYSID,
-            OBC_COMPID,
-            &msg,
-            (uint32_t)(esp_timer_get_time() / 1000),
-            PX4_SYSID,
-            PX4_COMPID,
-            MAV_FRAME_LOCAL_NED,
-            TYPEMASK_POSITION,
-            sp.x, sp.y, sp.z,           // position  — used
-            NAN, NAN, NAN,              // velocity  — ignored (MUST be NaN)
-            NAN, NAN, NAN,              // accel     — ignored
-            yaw,                        // yaw       — used (or NaN = keep current)
-            NAN                         // yaw_rate  — ignored (MUST be NaN)
-        );
-    }
+    mavlink_msg_set_position_target_local_ned_pack(
+        OBC_SYSID,
+        OBC_COMPID,
+        &msg,
+        (uint32_t)(esp_timer_get_time() / 1000),
+        PX4_SYSID,
+        PX4_COMPID,
+        MAV_FRAME_LOCAL_NED,
+        TYPEMASK_POSITION,
+        sp.x, sp.y, sp.z,   // position — used
+        NAN, NAN, NAN,       // velocity — ignored (MUST be NaN)
+        NAN, NAN, NAN,       // accel    — ignored
+        yaw,                 // yaw      — used (or NaN = keep current)
+        NAN                  // yaw_rate — ignored (MUST be NaN)
+    );
 
     send_message(&msg);
 }
@@ -379,7 +308,6 @@ void mavlink_task_init(void)
 
     // Default to position hold at origin — safe until mission_task sets a real target
     s_sp.type = SP_HOLD;
-    s_sp_update_ms = (uint32_t)(esp_timer_get_time() / 1000);
 
     // Create mutexes before the task starts
     s_sp_mutex    = xSemaphoreCreateMutex();
@@ -387,30 +315,6 @@ void mavlink_task_init(void)
 
     configASSERT(s_sp_mutex    != NULL);
     configASSERT(s_state_mutex != NULL);
-}
-
-void mavlink_set_velocity_ned(float vx, float vy, float vz, float yaw_rate)
-{
-    xSemaphoreTake(s_sp_mutex, portMAX_DELAY);
-    s_sp.type     = SP_VELOCITY;
-    s_sp.vx       = vx;
-    s_sp.vy       = vy;
-    s_sp.vz       = vz;
-    s_sp.yaw_rate = yaw_rate;
-    s_sp_update_ms = (uint32_t)(esp_timer_get_time() / 1000);
-    xSemaphoreGive(s_sp_mutex);
-}
-
-void mavlink_set_velocity_xy_position_z(float vx, float vy, float z, float yaw)
-{
-    xSemaphoreTake(s_sp_mutex, portMAX_DELAY);
-    s_sp.type = SP_VEL_XY_POS_Z;
-    s_sp.vx   = vx;
-    s_sp.vy   = vy;
-    s_sp.z    = z;
-    s_sp.yaw  = yaw;
-    s_sp_update_ms = (uint32_t)(esp_timer_get_time() / 1000);
-    xSemaphoreGive(s_sp_mutex);
 }
 
 void mavlink_set_position_ned(float x, float y, float z, float yaw)
@@ -421,7 +325,6 @@ void mavlink_set_position_ned(float x, float y, float z, float yaw)
     s_sp.y    = y;
     s_sp.z    = z;
     s_sp.yaw  = yaw;
-    s_sp_update_ms = (uint32_t)(esp_timer_get_time() / 1000);
     xSemaphoreGive(s_sp_mutex);
 }
 
@@ -435,7 +338,6 @@ void mavlink_set_hold(void)
     s_sp.x    = st.x;
     s_sp.y    = st.y;
     s_sp.z    = st.z;
-    s_sp_update_ms = (uint32_t)(esp_timer_get_time() / 1000);
     // Yaw set to NaN in send_setpoint() for SP_HOLD — PX4 keeps current heading
     xSemaphoreGive(s_sp_mutex);
 }

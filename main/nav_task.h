@@ -22,7 +22,8 @@
  *                      2 avoids retrying on a single-bin noise artefact.
  * --------------------------------------------------------------------------- */
 #define NAV_CRUISE_SPEED_MS     0.55f    /* forward cruise speed (m/s)            */
-#define NAV_YAW_TOL_RAD         0.1f   
+#define NAV_POS_LOOKAHEAD_S     1.0f    /* position carrot lookahead (s)         */
+#define NAV_YAW_TOL_RAD         0.1f
 #define NAV_ARRIVE_RADIUS_M     0.25f   /* XY goal-reached radius (m)            */
 #define NAV_STUCK_HOLD_MS       3500    /* hold duration before declaring stuck   */
 
@@ -42,8 +43,8 @@ typedef enum {
  * --------------------------------------------------------------------------- */
 typedef struct {
     nav_state_t state;
-    float       goal_x;              /* current goal NED north (m)               */
-    float       goal_y;              /* current goal NED east  (m)               */
+    float       goal_x;              /* current goal map-frame north (m)         */
+    float       goal_y;              /* current goal map-frame east  (m)         */
     float       goal_z;              /* current goal NED down  (m, negative AGL) */
     float       dist_to_goal;        /* horizontal distance remaining (m)        */
     float       heading_error_rad;   /* signed error toward goal, body frame     */
@@ -69,10 +70,11 @@ void nav_task(void *arg);
  * Control API  (thread-safe — safe to call from any task)
  * --------------------------------------------------------------------------- */
 
-/* Set a new goal in NED metres.
- *   goal_z: NED down (negative = above ground, e.g. -1.5 = 1.5 m AGL).
- * Resets state to NAV_ROTATING immediately. */
-void nav_set_goal_ned(float gx, float gy, float gz);
+/* Set a new goal in MAP frame (NED metres).
+ *   map_x, map_y: horizontal position in map frame.
+ *   z: NED down (negative = above ground, e.g. -1.5 = 1.5 m AGL).
+ * Converted to odom frame each nav tick so reloc corrections apply. */
+void nav_set_goal_map(float map_x, float map_y, float z);
 
 /* Cancel navigation — transitions to NAV_IDLE and commands position hold. */
 void nav_cancel(void);

@@ -36,19 +36,19 @@ drones:
   #   start_x: -1.4
   #   start_y: 7.9
 
-  6:
-    start_x: -1.4
-    start_y: -1.4
-  2:
-    start_x: -1.4
-    start_y: 0.0
   23:
     start_x: -1.4
-    start_y: 2.1
+    start_y: -1.4
   13:
     start_x: -1.4
+    start_y: 0.0
+  27:
+    start_x: -1.4
+    start_y: 2.1
+  12:
+    start_x: -1.4
     start_y: 5.0
-  25:
+  17:
     start_x: -1.4
     start_y: 7.9
   # 1:
