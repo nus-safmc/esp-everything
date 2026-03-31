@@ -13,6 +13,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 
 #include <math.h>
 #include <string.h>
@@ -185,6 +186,8 @@ static void handle_peers(const uint8_t *buf, int len)
         memcpy(&list.peers[i].map_y, p, sizeof(float)); p += sizeof(float);
     }
 
+    list.update_ms = (uint32_t)(esp_timer_get_time() / 1000);
+
     xSemaphoreTake(s_peer_mutex, portMAX_DELAY);
     s_peers = list;
     xSemaphoreGive(s_peer_mutex);
@@ -197,6 +200,14 @@ wifi_peer_list_t wifi_get_peers(void)
     xSemaphoreTake(s_peer_mutex, portMAX_DELAY);
     wifi_peer_list_t copy = s_peers;
     xSemaphoreGive(s_peer_mutex);
+
+    /* Discard peer data older than 1 s — positions are too stale to trust */
+    if (copy.count > 0) {
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        if ((now_ms - copy.update_ms) > 1000) {
+            copy.count = 0;
+        }
+    }
     return copy;
 }
 

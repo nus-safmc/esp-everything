@@ -305,7 +305,7 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
     } else {
         /* Normal navigation */
         float steering = vfh_compute(&scan, vfh_cfg, goal_body_angle,
-                                     nav.prev_steering_rad, NULL);
+                                     nav.prev_steering_rad, blocked);
         new_steering = steering;
 
         /* |steering| is the heading error: how much we must rotate before flying.
