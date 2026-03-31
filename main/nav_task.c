@@ -343,10 +343,40 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
         } else {
             /* ---- FLYING: aligned — fly forward at desired_yaw ----
              * VFH re-evaluates every tick; if an obstacle causes |steering| to
-             * exceed NAV_YAW_TOL_RAD, the drone stops and re-aligns. */
+             * exceed NAV_YAW_TOL_RAD, the drone stops and re-aligns.
+             *
+             * Speed is scaled by the closest obstacle in the forward 90°
+             * arc so the drone decelerates smoothly before walls, giving
+             * ToF round-robin updates time to catch up. */
             new_state = NAV_FLYING;
-            float vx = NAV_CRUISE_SPEED_MS * cosf(desired_yaw);
-            float vy = NAV_CRUISE_SPEED_MS * sinf(desired_yaw);
+
+            /* Find min range in ±45° forward arc from collapsed scan */
+            float min_fwd = 999.0f;
+            for (int i = 0; i < COLLISION_SCAN_PTS; i++) {
+                float bin_rad = (float)i * (2.0f * (float)M_PI / (float)COLLISION_SCAN_PTS);
+                float diff = wrap_pi(bin_rad - steering);
+                if (fabsf(diff) <= (float)M_PI / 4.0f && scan.ranges[i] < min_fwd) {
+                    min_fwd = scan.ranges[i];
+                }
+            }
+
+            /* Ramp speed: full cruise above 1.5 m, linearly down to 30%
+             * at COLLISION_DANGER_M, clamped so we never command < 30%. */
+#define SPEED_RAMP_FULL_M   1.5f
+#define SPEED_RAMP_MIN_FRAC 0.30f
+            float frac = 1.0f;
+            if (min_fwd < SPEED_RAMP_FULL_M) {
+                frac = SPEED_RAMP_MIN_FRAC
+                     + (1.0f - SPEED_RAMP_MIN_FRAC)
+                       * (min_fwd - COLLISION_DANGER_M)
+                       / (SPEED_RAMP_FULL_M - COLLISION_DANGER_M);
+                if (frac < SPEED_RAMP_MIN_FRAC) frac = SPEED_RAMP_MIN_FRAC;
+                if (frac > 1.0f) frac = 1.0f;
+            }
+
+            float speed = NAV_CRUISE_SPEED_MS * frac;
+            float vx = speed * cosf(desired_yaw);
+            float vy = speed * sinf(desired_yaw);
             mavlink_set_velocity_xy_position_z(vx, vy, nav.goal_z, desired_yaw);
         }
 

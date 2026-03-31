@@ -422,7 +422,7 @@ void tof_task(void *arg)
                 if (s_sensor_ok[sensor])
                     ESP_LOGI(TAG, "[%d] sensor recovered", sensor);
             }
-            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
+            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(8));
             continue;
         }
 
@@ -430,7 +430,7 @@ void tof_task(void *arg)
         if (tca_select(sensor) != ESP_OK) {
             ESP_LOGW(TAG, "[%d] mux select failed", sensor);
             consecutive_fails++;
-            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
+            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(8));
             continue;
         }
 
@@ -440,7 +440,7 @@ void tof_task(void *arg)
         if (status) {
             ESP_LOGW(TAG, "[%d] check_data_ready status=%d", sensor, status);
             consecutive_fails++;
-            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
+            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(8));
             continue;
         }
 
@@ -470,9 +470,8 @@ void tof_task(void *arg)
             }
         }
 
-        // Yield for 20ms — matches mapper.c cadence, allows other tasks to run.
-        // At 60Hz ranging frequency, new data arrives every ~17ms, so we miss
-        // at most one frame per poll, which is fine for obstacle avoidance.
-        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
+        // Yield for 8ms — 8 sensors × 8ms = 64ms full cycle ≈ 15 Hz,
+        // matching the sensor ranging frequency so we read nearly every frame.
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(8));
     }
 }
