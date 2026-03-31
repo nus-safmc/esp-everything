@@ -78,7 +78,9 @@ def main():
     # ------------------------------------------------------------------
     # Components
     # ------------------------------------------------------------------
-    store    = CrumbStore()
+    arena = cfg["arena"]
+    arena_bounds = (arena["min_x"], arena["max_x"], arena["min_y"], arena["max_y"])
+    store    = CrumbStore(arena_bounds=arena_bounds)
     director = ExplorationDirector(store, args.config)
     monitor  = StuckMonitor(director, store, args.config)
     vfh_log  = VfhLogger()

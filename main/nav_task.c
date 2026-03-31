@@ -69,7 +69,7 @@ static float wrap_pi(float a)
  *  Head-on at 0.6 m/s each → 3.33 / 1.2 = 2.8 s warning.
  */
 #define PEER_INJECT_RANGE_M   4.0f   /* ignore peers beyond this distance (m)  */
-#define PEER_DENSITY_MAX      9.0f   /* density at distance 0 (threshold=1.5)  */
+#define PEER_DENSITY_MAX      10.0f   /* density at distance 0 (threshold=1.5)  */
 #define PEER_BIN_SPREAD       3      /* inject into ±N VFH bins around bearing */
 
 static void inject_peers_into_histogram(float hist[VFH_BINS],
@@ -119,8 +119,8 @@ static void inject_peers_into_histogram(float hist[VFH_BINS],
  *
  * Returns true if avoidance fired (caller should skip the rest of nav_tick).
  * --------------------------------------------------------------------------- */
-#define COLLISION_DANGER_M    0.37f   /* trigger threshold (m)                    */
-#define COLLISION_CLEAR_M     0.47f   /* resume normal nav once all points above  */
+#define COLLISION_DANGER_M    0.40f   /* trigger threshold (m)                    */
+#define COLLISION_CLEAR_M     0.50f   /* resume normal nav once all points above  */
 #define COLLISION_SPEED_MS    0.35f    /* escape velocity magnitude (m/s)          */
 
 static bool s_collision_active = false;

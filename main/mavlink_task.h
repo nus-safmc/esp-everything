@@ -25,7 +25,7 @@
 // FreeRTOS placement — Core 0, highest priority to meet 20Hz hard deadline
 #define MAV_TASK_CORE       0
 #define MAV_TASK_PRIORITY   5
-#define MAV_TASK_STACK      4096
+#define MAV_TASK_STACK      6144
 
 // ---------------------------------------------------------------------------
 // Telemetry readback — written by mavlink_task, read by mission_task

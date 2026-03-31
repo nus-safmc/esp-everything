@@ -9,7 +9,7 @@
  * --------------------------------------------------------------------------- */
 #define WIFI_TASK_CORE      0
 #define WIFI_TASK_PRIORITY  2
-#define WIFI_TASK_STACK     4096
+#define WIFI_TASK_STACK     12288
 
 /* Max crumbs to batch in a single telemetry packet.
  * At 0.4 m spacing and 0.5 m/s cruise, ~1.25 crumbs/s — 10 per packet is plenty. */

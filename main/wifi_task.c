@@ -235,7 +235,9 @@ void wifi_task(void *arg)
         .sin_port        = htons(WIFI_CMD_PORT),
         .sin_addr.s_addr = htonl(INADDR_ANY),
     };
-    bind(rx_sock, (struct sockaddr *)&bind_addr, sizeof(bind_addr));
+    if (bind(rx_sock, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0) {
+        ESP_LOGE(TAG, "Command socket bind failed (port %d)", WIFI_CMD_PORT);
+    }
     int flags = fcntl(rx_sock, F_GETFL, 0);
     fcntl(rx_sock, F_SETFL, flags | O_NONBLOCK);
 

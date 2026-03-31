@@ -17,6 +17,9 @@ import logging
 import signal
 import sys
 import time
+from pathlib import Path
+
+import yaml
 
 from comms import CommsNode
 from crumb_store import CrumbStore
@@ -46,7 +49,10 @@ def main():
     drone_id = args.drone_id
 
     # --- Initialise components ---
-    store    = CrumbStore()
+    cfg = yaml.safe_load(Path(args.config).read_text())
+    arena = cfg["arena"]
+    arena_bounds = (arena["min_x"], arena["max_x"], arena["min_y"], arena["max_y"])
+    store    = CrumbStore(arena_bounds=arena_bounds)
     director = ExplorationDirector(store, args.config)
     comms    = CommsNode(listen_port=args.telem_port, cmd_port=args.cmd_port,
                          config_path=args.config)

@@ -19,7 +19,10 @@ import threading
 
 
 class CrumbStore:
-    def __init__(self, cell_size: float = 0.1):
+    def __init__(self, cell_size: float = 0.1,
+                 start_positions: list[tuple[float, float]] | None = None,
+                 start_ignore_radius: float = 0.3,
+                 arena_bounds: tuple[float, float, float, float] | None = None):
         self._cell_size = cell_size
         self._inv_cell = 1.0 / cell_size
 
@@ -34,6 +37,13 @@ class CrumbStore:
         self._per_drone: dict[int, int] = {}
 
         self._lock = threading.Lock()
+
+        # Start positions to ignore for density calculations
+        self._start_positions = start_positions or []
+        self._start_ignore_r2 = start_ignore_radius ** 2
+
+        # Arena bounds (min_x, max_x, min_y, max_y) for density normalisation
+        self._arena = arena_bounds
 
     # ------------------------------------------------------------------
     # Ingestion
@@ -72,7 +82,7 @@ class CrumbStore:
         half_angle_rad: float = math.radians(30),
     ) -> float:
         """
-        Weighted visit density inside a forward cone.
+        Weighted visit density inside a forward cone, normalised by arena area.
 
         origin:         (x, y) centre of the cone in map frame
         direction_rad:  NED bearing of the cone axis (rad, CW from north)
@@ -82,15 +92,18 @@ class CrumbStore:
         Returns a float score — higher means more explored.
         Grid cells closer to the origin are weighted more heavily
         (weight = 1 - dist/radius), scaled by the cell's visit count.
+
+        Only cells inside the arena contribute.  The result is normalised by
+        the total weight of in-arena cells so that cones clipped by the arena
+        edge are comparable to cones fully inside it.
         """
         with self._lock:
             grid = self._grid
-        if not grid:
-            return 0.0
 
         ox, oy = origin
         cell = self._cell_size
         inv_cell = self._inv_cell
+        arena = self._arena  # (min_x, max_x, min_y, max_y) or None
 
         # Bounding box in grid coordinates
         r_cells = int(math.ceil(radius * inv_cell))
@@ -98,15 +111,17 @@ class CrumbStore:
         cy = int(math.floor(oy * inv_cell))
 
         total = 0.0
+        area_weight = 0.0
         for ix in range(cx - r_cells, cx + r_cells + 1):
             for iy in range(cy - r_cells, cy + r_cells + 1):
-                count = grid.get((ix, iy), 0)
-                if count == 0:
-                    continue
-
                 # Cell centre position
                 px = (ix + 0.5) * cell
                 py = (iy + 0.5) * cell
+
+                # Skip cells outside the arena
+                if arena is not None:
+                    if px < arena[0] or px > arena[1] or py < arena[2] or py > arena[3]:
+                        continue
 
                 dx = px - ox
                 dy = py - oy
@@ -120,10 +135,26 @@ class CrumbStore:
                 if abs(diff) > half_angle_rad:
                     continue
 
+                # Skip cells near drone start positions
+                if self._start_positions:
+                    near_start = False
+                    for sx, sy in self._start_positions:
+                        sdx = px - sx
+                        sdy = py - sy
+                        if sdx * sdx + sdy * sdy <= self._start_ignore_r2:
+                            near_start = True
+                            break
+                    if near_start:
+                        continue
+
                 weight = 1.0 - dist / radius
+                area_weight += weight
+                count = grid.get((ix, iy), 0)
                 total += weight * count
 
-        return total
+        if area_weight == 0.0:
+            return 0.0
+        return total / area_weight
 
     def total_crumbs(self) -> int:
         """Total number of recorded positions across all drones."""

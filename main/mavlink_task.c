@@ -83,9 +83,14 @@ typedef struct {
 // ---------------------------------------------------------------------------
 static setpoint_t    s_sp;
 static drone_state_t s_state;
+static uint32_t      s_sp_update_ms;   // timestamp of last setpoint update
 
 static SemaphoreHandle_t s_sp_mutex;
 static SemaphoreHandle_t s_state_mutex;
+
+// If no task updates the setpoint for this long, auto-switch to position hold.
+// Protects against nav_task crash leaving a stale velocity command.
+#define SP_STALE_TIMEOUT_MS  300
 
 // ---------------------------------------------------------------------------
 // MAVLink send helpers
@@ -135,7 +140,21 @@ static void send_setpoint(void)
     // Snapshot under mutex — copy is cheap (28 bytes)
     xSemaphoreTake(s_sp_mutex, portMAX_DELAY);
     setpoint_t sp = s_sp;
+    uint32_t sp_age_ms = (uint32_t)(esp_timer_get_time() / 1000) - s_sp_update_ms;
     xSemaphoreGive(s_sp_mutex);
+
+    // Safety watchdog: if a velocity setpoint hasn't been refreshed, auto-hold.
+    // This catches nav_task crashes that would leave a stale velocity command.
+    // Position/hold setpoints are inherently safe (drone stays in place).
+    if ((sp.type == SP_VELOCITY || sp.type == SP_VEL_XY_POS_Z)
+            && sp_age_ms > SP_STALE_TIMEOUT_MS) {
+        ESP_LOGW(TAG, "Setpoint stale (%lu ms) — auto hold", (unsigned long)sp_age_ms);
+        mavlink_set_hold();
+        // Re-snapshot after auto-hold
+        xSemaphoreTake(s_sp_mutex, portMAX_DELAY);
+        sp = s_sp;
+        xSemaphoreGive(s_sp_mutex);
+    }
 
     mavlink_message_t msg;
 
@@ -360,6 +379,7 @@ void mavlink_task_init(void)
 
     // Default to position hold at origin — safe until mission_task sets a real target
     s_sp.type = SP_HOLD;
+    s_sp_update_ms = (uint32_t)(esp_timer_get_time() / 1000);
 
     // Create mutexes before the task starts
     s_sp_mutex    = xSemaphoreCreateMutex();
@@ -377,6 +397,7 @@ void mavlink_set_velocity_ned(float vx, float vy, float vz, float yaw_rate)
     s_sp.vy       = vy;
     s_sp.vz       = vz;
     s_sp.yaw_rate = yaw_rate;
+    s_sp_update_ms = (uint32_t)(esp_timer_get_time() / 1000);
     xSemaphoreGive(s_sp_mutex);
 }
 
@@ -388,6 +409,7 @@ void mavlink_set_velocity_xy_position_z(float vx, float vy, float z, float yaw)
     s_sp.vy   = vy;
     s_sp.z    = z;
     s_sp.yaw  = yaw;
+    s_sp_update_ms = (uint32_t)(esp_timer_get_time() / 1000);
     xSemaphoreGive(s_sp_mutex);
 }
 
@@ -399,6 +421,7 @@ void mavlink_set_position_ned(float x, float y, float z, float yaw)
     s_sp.y    = y;
     s_sp.z    = z;
     s_sp.yaw  = yaw;
+    s_sp_update_ms = (uint32_t)(esp_timer_get_time() / 1000);
     xSemaphoreGive(s_sp_mutex);
 }
 
@@ -412,6 +435,7 @@ void mavlink_set_hold(void)
     s_sp.x    = st.x;
     s_sp.y    = st.y;
     s_sp.z    = st.z;
+    s_sp_update_ms = (uint32_t)(esp_timer_get_time() / 1000);
     // Yaw set to NaN in send_setpoint() for SP_HOLD — PX4 keeps current heading
     xSemaphoreGive(s_sp_mutex);
 }

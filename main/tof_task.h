@@ -20,7 +20,7 @@
 // FreeRTOS placement — Core 0, below mavlink but above mission
 #define TOF_TASK_CORE           0
 #define TOF_TASK_PRIORITY       4
-#define TOF_TASK_STACK          6144
+#define TOF_TASK_STACK          8192
 
 // ---------------------------------------------------------------------------
 // Sensor angular layout

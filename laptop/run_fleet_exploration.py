@@ -26,7 +26,7 @@ from comms import CommsNode
 from crumb_store import CrumbStore
 from exploration import ExplorationDirector
 from visualise import Visualiser
-from vfh_logger import VfhLogger
+# from vfh_logger import VfhLogger
 from protocol import (
     CMD_GOTO, CMD_LAND, CMD_START, CommandPacket,
     NAV_IDLE, NAV_ARRIVED, NAV_STUCK,
@@ -52,10 +52,21 @@ def main():
     drone_ids = sorted(int(did) for did in cfg["drones"])
     log.info("Fleet: drones %s", drone_ids)
 
+    # Start positions from config (used for staggered launch)
+    drone_starts: dict[int, tuple[float, float]] = {}
+    for did in drone_ids:
+        dcfg = cfg["drones"][did]
+        drone_starts[did] = (dcfg["start_x"], dcfg["start_y"])
+
+    # Arena bounds for density normalisation
+    arena = cfg["arena"]
+    arena_bounds = (arena["min_x"], arena["max_x"], arena["min_y"], arena["max_y"])
+
     # --- Initialise components ---
-    store    = CrumbStore()
+    store    = CrumbStore(start_positions=list(drone_starts.values()),
+                          arena_bounds=arena_bounds)
     director = ExplorationDirector(store, args.config)
-    vfh_log  = VfhLogger()
+    # vfh_log  = VfhLogger()
     comms    = CommsNode(listen_port=args.telem_port, cmd_port=args.cmd_port,
                          config_path=args.config)
 
@@ -68,6 +79,7 @@ def main():
     last_log_time = 0.0
 
     exploring = False
+    exploring_drones: set[int] = set()  # drones allowed to explore (staggered)
 
     def on_telemetry(pkt: TelemetryPacket, src_ip: str):
         nonlocal last_log_time
@@ -98,7 +110,7 @@ def main():
                         store.crumb_count(d),
                     )
 
-        if not exploring:
+        if not exploring or did not in exploring_drones:
             return
 
         # --- Send exploration goal when this drone is ready (rate-limited) ---
@@ -120,7 +132,7 @@ def main():
                 last_goal_time[did] = now
 
     comms.on_telemetry(on_telemetry)
-    comms.on_telemetry(vfh_log.feed)
+    # comms.on_telemetry(vfh_log.feed)
 
     # --- Visualiser (fed via callback, no separate socket) ---
     vis = Visualiser(store, args.config)
@@ -144,10 +156,12 @@ def main():
     # --- Interactive triggers + run loop (background thread) ---
     # matplotlib needs the main thread, so we run the trigger/wait logic
     # in a daemon thread and give the main thread to vis.run().
+    STAGGER_DELAY_S = 5.0  # seconds between enabling exploration per drone
+
     def control_loop():
         nonlocal exploring, shutdown
 
-        # Trigger 1: arm + takeoff all drones
+        # Trigger 1: arm + takeoff all drones simultaneously
         print(f"\nPress Enter to send CMD_START to all {len(drone_ids)} drones, "
               "or Ctrl+C to abort.")
         try:
@@ -159,17 +173,25 @@ def main():
             log.info("Sending CMD_START to all drones")
             comms.send_all(CommandPacket(CMD_START))
 
-        # Trigger 2: start exploration
+        # Trigger 2: start exploration with staggered goals
         if not shutdown:
-            print("\nPress Enter to start fleet exploration, or Ctrl+C to land all.")
+            print(f"\nPress Enter to start fleet exploration "
+                  f"(staggered {STAGGER_DELAY_S}s apart), or Ctrl+C to land all.")
             try:
                 input()
             except (EOFError, KeyboardInterrupt):
                 shutdown = True
 
         if not shutdown:
-            log.info("Starting fleet exploration")
             exploring = True
+            for i, did in enumerate(drone_ids):
+                if shutdown:
+                    break
+                exploring_drones.add(did)
+                log.info("Exploration enabled → drone %d (%d/%d)",
+                         did, i + 1, len(drone_ids))
+                if i < len(drone_ids) - 1:
+                    time.sleep(STAGGER_DELAY_S)
 
         # Run until Ctrl+C
         try:
@@ -182,7 +204,7 @@ def main():
         log.info("Sending CMD_LAND to all drones")
         comms.send_all(CommandPacket(CMD_LAND))
         time.sleep(1.0)
-        vfh_log.stop()
+        # vfh_log.stop()
         comms.stop()
 
         total_goals = sum(goal_counts.values())

@@ -289,7 +289,7 @@ void app_main(void)
         NULL, AT_TASK_PRIORITY, NULL, AT_TASK_CORE
     );
     xTaskCreatePinnedToCore(
-        mission_task, "mission", 4096,
+        mission_task, "mission", 6144,
         NULL, 2, NULL, 1
     );
 
