@@ -77,6 +77,31 @@ nav_tags:
   # 16: {map_x: 1.0, map_y: 6.0}
   # 17: {map_x: 3.0, map_y: 6.0}
   # 18: {map_x: 5.0, map_y: 6.0}
+# ---------------------------------------------------------------------------
+# Mission phase configuration (used by run_mission.py)
+# ---------------------------------------------------------------------------
+mission:
+  # Batch 1 — exploration & rescue drones (first simultaneous takeoff).
+  # Default: all drone IDs in `drones` section above.
+  explore_ids: [25, 8, 11, 6]
+
+  # Batch 2 — relay chain drones (second simultaneous takeoff).
+  # Leave empty to skip the relay phase entirely.
+  relay_ids: []
+  # relay_ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13]
+
+  # Start-area anchor point (map frame) for the relay chain endpoint.
+  # One relay drone will land here; the chain extends to the bonus victim.
+  relay_start: [0.0, 3.0]
+
+  # AprilTag IDs placed at bonus victims.  When an exploration drone
+  # discovers one of these tags, its position becomes a relay target.
+  # Leave empty if unknown — any discovered tag can be selected manually.
+  bonus_tag_ids: []
+
+  # Max distance between adjacent relay drones (rules require < 1.0 m).
+  relay_spacing_m: 0.9
+
 # Exploration parameters
 exploration:
   goal_distance: 3.0       # project goal this far ahead (m)
