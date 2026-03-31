@@ -2,7 +2,6 @@
 #include "mavlink_task.h"
 #include "tof_task.h"
 #include "vfh.h"
-#include "breadcrumb.h"
 #include "wifi_task.h"
 #include "odom.h"
 
@@ -236,9 +235,6 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
 
     drone_state_t drone = mavlink_get_state();
 
-    /* Record position breadcrumb */
-    crumb_update(drone.x, drone.y);
-
     /* ---- Horizontal distance to goal ---- */
     float dx   = nav.goal_x - drone.x;
     float dy   = nav.goal_y - drone.y;
@@ -387,7 +383,6 @@ void nav_task_init(void)
     s_status.state = NAV_IDLE;
     s_mutex = xSemaphoreCreateMutex();
     configASSERT(s_mutex != NULL);
-    crumb_init();
 }
 
 void nav_set_goal_ned(float gx, float gy, float gz)

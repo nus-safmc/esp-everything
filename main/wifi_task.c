@@ -1,7 +1,6 @@
 #include "wifi_task.h"
 #include "mavlink_task.h"
 #include "nav_task.h"
-#include "breadcrumb.h"
 #include "at_detect.h"
 #include "odom.h"
 #include "tof_task.h"
@@ -303,24 +302,6 @@ void wifi_task(void *arg)
 
         pkt.reloc_age_s = odom_reloc_age_s();
 
-        /* Crumb batch — send any unsent crumbs */
-        int total_crumbs = crumb_count();
-        int last_sent    = crumb_last_sent();
-        int next_to_send = last_sent + 1;
-
-        pkt.crumb_count     = (uint16_t)total_crumbs;
-        pkt.crumb_last_sent = (last_sent < 0) ? 0xFFFF : (uint16_t)last_sent;
-
-        /* Read crumbs (odom frame) and convert to map frame before sending */
-        crumb_t raw_crumbs[WIFI_MAX_CRUMBS_PKT];
-        int n = crumb_read(next_to_send, raw_crumbs, WIFI_MAX_CRUMBS_PKT);
-        pkt.crumb_batch_start = (uint16_t)next_to_send;
-        pkt.crumb_batch_count = (uint8_t)n;
-        for (int i = 0; i < n; i++) {
-            odom_to_map(raw_crumbs[i].x, raw_crumbs[i].y,
-                        &pkt.crumb_batch[i].x, &pkt.crumb_batch[i].y);
-        }
-
         /* ---- Send telemetry ---- */
         send(tx_sock, &pkt, sizeof(pkt), 0);
 
@@ -337,10 +318,6 @@ void wifi_task(void *arg)
             memcpy(dbg.target_status, scan.frame[TOF_FRONT_SENSOR_IDX].target_status,
                    sizeof(dbg.target_status));
             send(tof_sock, &dbg, sizeof(dbg), 0);
-        }
-
-        if (n > 0) {
-            crumb_mark_sent(next_to_send + n - 1);
         }
 
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(100));   /* 10 Hz */

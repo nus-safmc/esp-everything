@@ -2,7 +2,7 @@
 Packet definitions for ESP32 ↔ laptop UDP protocol.
 
 Telemetry (ESP32 → laptop, 10 Hz):
-    Fixed 60-byte header followed by a variable crumb batch.
+    Fixed-size packet.
 
 Command (laptop → ESP32, event-driven):
     Fixed 18-byte packet.
@@ -27,7 +27,6 @@ CMD_START         = 0x05   # arm and take off
 CMD_SET_PEERS     = 0x06   # update nearby drone positions for inter-drone avoidance
 
 VFH_BINS    = 32
-MAX_CRUMBS_PKT = 10
 
 # Nav state values (must match nav_state_t in nav_task.h)
 NAV_IDLE       = 0
@@ -50,32 +49,24 @@ NAV_STATE_NAMES = {
 # Telemetry packet
 # ---------------------------------------------------------------------------
 
-# Fixed header: pkt_type, drone_id, ned_x, ned_y, heading_rad,
-#               nav_state, tag_id, tag_dist_m, crumb_count, crumb_last_sent,
-#               vfh_blocked[32], is_stuck, reloc_age_s, crumb_batch_start,
-#               crumb_batch_count
-_TELEM_HDR_FMT  = "<BBfffBbfHH32sBHHB"
-_TELEM_HDR_SIZE = struct.calcsize(_TELEM_HDR_FMT)   # 62 bytes
-_CRUMB_FMT      = "<ff"
-_CRUMB_SIZE     = struct.calcsize(_CRUMB_FMT)        # 8 bytes
+# Wire format: pkt_type, drone_id, ned_x, ned_y, heading_rad,
+#              nav_state, tag_id, tag_dist_m, vfh_blocked[32], is_stuck, reloc_age_s
+_TELEM_HDR_FMT  = "<BBfffBbf32sBH"
+_TELEM_HDR_SIZE = struct.calcsize(_TELEM_HDR_FMT)   # 55 bytes
 
 
 @dataclass
 class TelemetryPacket:
-    drone_id:          int
-    ned_x:             float
-    ned_y:             float
-    heading_rad:       float
-    nav_state:         int
-    tag_id:            int              # −1 if no tag visible
-    tag_dist_m:        float
-    crumb_count:       int              # total crumbs on drone
-    crumb_last_sent:   int              # 0xFFFF = none sent yet
-    vfh_blocked:       list            # VFH_BINS bools
-    is_stuck:          bool
-    reloc_age_s:       int              # seconds since last nav-tag fix (0xFFFF = never)
-    crumb_batch_start: int
-    crumbs:            list            # list of (x, y) floats, new this packet
+    drone_id:    int
+    ned_x:       float
+    ned_y:       float
+    heading_rad: float
+    nav_state:   int
+    tag_id:      int              # −1 if no tag visible
+    tag_dist_m:  float
+    vfh_blocked: list            # VFH_BINS bools
+    is_stuck:    bool
+    reloc_age_s: int              # seconds since last nav-tag fix (0xFFFF = never)
 
     @property
     def nav_state_name(self) -> str:
@@ -89,38 +80,25 @@ def parse_telemetry(data: bytes) -> Optional[TelemetryPacket]:
 
     fields = struct.unpack_from(_TELEM_HDR_FMT, data, 0)
     (pkt_type, drone_id, ned_x, ned_y, heading_rad,
-     nav_state, tag_id, tag_dist_m, crumb_count, crumb_last_sent,
-     vfh_raw, is_stuck, reloc_age_s, crumb_batch_start, crumb_batch_count) = fields
+     nav_state, tag_id, tag_dist_m,
+     vfh_raw, is_stuck, reloc_age_s) = fields
 
     if pkt_type != PKT_TELEM:
         return None
 
     vfh_blocked = [bool(b) for b in vfh_raw]
 
-    crumbs = []
-    offset = _TELEM_HDR_SIZE
-    for _ in range(crumb_batch_count):
-        if offset + _CRUMB_SIZE > len(data):
-            break
-        x, y = struct.unpack_from(_CRUMB_FMT, data, offset)
-        crumbs.append((x, y))
-        offset += _CRUMB_SIZE
-
     return TelemetryPacket(
-        drone_id          = drone_id,
-        ned_x             = ned_x,
-        ned_y             = ned_y,
-        heading_rad       = heading_rad,
-        nav_state         = nav_state,
-        tag_id            = tag_id,
-        tag_dist_m        = tag_dist_m,
-        crumb_count       = crumb_count,
-        crumb_last_sent   = crumb_last_sent,
-        vfh_blocked       = vfh_blocked,
-        is_stuck          = bool(is_stuck),
-        reloc_age_s       = reloc_age_s,
-        crumb_batch_start = crumb_batch_start,
-        crumbs            = crumbs,
+        drone_id    = drone_id,
+        ned_x       = ned_x,
+        ned_y       = ned_y,
+        heading_rad = heading_rad,
+        nav_state   = nav_state,
+        tag_id      = tag_id,
+        tag_dist_m  = tag_dist_m,
+        vfh_blocked = vfh_blocked,
+        is_stuck    = bool(is_stuck),
+        reloc_age_s = reloc_age_s,
     )
 
 # ---------------------------------------------------------------------------

@@ -6,7 +6,6 @@ idf_component_register(
         "vfh.c"
         "nav_task.c"
         "at_detect.c"
-        "breadcrumb.c"
         "wifi_task.c"
         "odom.c"
     INCLUDE_DIRS "."

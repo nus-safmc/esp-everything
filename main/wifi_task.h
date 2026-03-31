@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stdint.h>
-#include "breadcrumb.h"
 #include "vfh.h"
 
 /* ---------------------------------------------------------------------------
@@ -10,10 +9,6 @@
 #define WIFI_TASK_CORE      0
 #define WIFI_TASK_PRIORITY  2
 #define WIFI_TASK_STACK     12288
-
-/* Max crumbs to batch in a single telemetry packet.
- * At 0.4 m spacing and 0.5 m/s cruise, ~1.25 crumbs/s — 10 per packet is plenty. */
-#define WIFI_MAX_CRUMBS_PKT  10
 
 /* Packet type bytes */
 #define WIFI_PKT_TELEM       0x01
@@ -32,7 +27,6 @@
 
 /* ---------------------------------------------------------------------------
  * Telemetry packet — sent at 10 Hz over UDP to laptop.
- * Fixed header followed by a variable-length crumb batch.
  * Packed so sizeof() gives the exact wire size.
  * --------------------------------------------------------------------------- */
 typedef struct __attribute__((packed)) {
@@ -47,17 +41,10 @@ typedef struct __attribute__((packed)) {
     int8_t   tag_id;                        /* last AprilTag ID, −1 if none     */
     float    tag_dist_m;                    /* horizontal dist to tag (m)       */
 
-    uint16_t crumb_count;                   /* total crumbs recorded            */
-    uint16_t crumb_last_sent;               /* last sent index (0xFFFF = none)  */
-
     uint8_t  vfh_blocked[VFH_BINS];         /* 1 = blocked, 0 = free            */
     uint8_t  is_stuck;                      /* 1 = STUCK or RETREATING          */
 
     uint16_t reloc_age_s;                   /* seconds since last nav-tag fix   */
-
-    uint16_t crumb_batch_start;             /* index of first crumb in batch    */
-    uint8_t  crumb_batch_count;             /* number of crumbs in this packet  */
-    crumb_t  crumb_batch[WIFI_MAX_CRUMBS_PKT]; /* crumb data                   */
 } wifi_telem_pkt_t;
 
 /* ---------------------------------------------------------------------------
