@@ -475,17 +475,17 @@ void nav_task(void *arg)
 
     while (1) {
         /* ---- WiFi link-loss killswitch ----
-         * If the link has been continuously down for >3 s while armed,
-         * cancel navigation and disarm immediately (motor cut / drop). */
+         * Immediately cancel navigation and hold position when WiFi drops.
+         * If the link stays down for >3 s while armed, disarm (motor cut). */
         if (!wifi_is_connected()) {
             if (wifi_discon_tick == 0) {
                 wifi_discon_tick = xTaskGetTickCount();
-                ESP_LOGW(TAG, "WiFi link lost — disarming in 3 s if not restored");
+                nav_cancel();   /* hold position immediately — don't fly blind */
+                ESP_LOGW(TAG, "WiFi link lost — holding position, disarm in 3 s");
             } else if (!wifi_kill_sent &&
                        (xTaskGetTickCount() - wifi_discon_tick) >= pdMS_TO_TICKS(3000) &&
                        mavlink_get_state().armed) {
                 ESP_LOGE(TAG, "WiFi lost >3 s — motor kill (disarm)");
-                nav_cancel();
                 mavlink_arm(false);
                 wifi_kill_sent = true;
             }
@@ -495,6 +495,12 @@ void nav_task(void *arg)
                 wifi_discon_tick = 0;
                 wifi_kill_sent   = false;
             }
+        }
+
+        /* Skip navigation while WiFi is down — hold was already commanded */
+        if (wifi_discon_tick != 0) {
+            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(50));
+            continue;
         }
 
         nav_tick(&vfh_cfg);
