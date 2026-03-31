@@ -13,12 +13,12 @@
 # Used by the laptop for crumb transforms before the first vision fix.
 
 drones:
-  24:
-    start_x: 0.0
-    start_y: 0.0
-  26:
-    start_x: 1.0
-    start_y: 0.0
+  # 24:
+  #   start_x: 0.0
+  #   start_y: 0.0
+  # 26:
+  #   start_x: 1.0
+  #   start_y: 0.0
   # 7:
   #   start_x: 1.0
   #   start_y: 2.0
@@ -36,21 +36,21 @@ drones:
   #   start_x: -1.4
   #   start_y: 7.9
 
-  # 17:
-  #   start_x: -1.4
-  #   start_y: -1.4
-  # 5:
-  #   start_x: -1.4
-  #   start_y: 0.0
-  # 24:
-  #   start_x: -1.4
-  #   start_y: 2.1
-  # 2:
-  #   start_x: -1.4
-  #   start_y: 5.0
-  # 6:
-  #   start_x: -1.4
-  #   start_y: 7.9
+  6:
+    start_x: -1.4
+    start_y: -1.4
+  2:
+    start_x: -1.4
+    start_y: 0.0
+  23:
+    start_x: -1.4
+    start_y: 2.1
+  13:
+    start_x: -1.4
+    start_y: 5.0
+  25:
+    start_x: -1.4
+    start_y: 7.9
   # 1:
   #   start_x: -1.4
   #   start_y: 10.0
@@ -85,7 +85,7 @@ nav_tags:
   0: {map_x: 10.0, map_y: 5.0}
   11: {map_x: 0.0, map_y: 5.0}
   10: {map_x: 5.0, map_y: 10.0}
-  9: {map_x: 5.0, map_y: 0.0}
+  1: {map_x: 5.0, map_y: 0.0}
   # 14: {map_x: 3.0, map_y: 3.0}
   # 15: {map_x: 5.0, map_y: 3.0}
   # 16: {map_x: 1.0, map_y: 6.0}
