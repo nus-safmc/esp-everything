@@ -112,6 +112,7 @@ typedef struct {
 typedef struct {
     wifi_peer_t peers[WIFI_MAX_PEERS];
     uint8_t     count;
+    uint32_t    update_ms;  /* esp_timer ms when last CMD_SET_PEERS arrived */
 } wifi_peer_list_t;
 
 /* Thread-safe snapshot of current peer positions. */
