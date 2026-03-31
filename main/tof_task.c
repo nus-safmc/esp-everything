@@ -328,18 +328,34 @@ void tof_task(void *arg)
     s_dev.platform.bus_config = bus_cfg;
     ESP_ERROR_CHECK(i2c_master_bus_add_device(s_bus_handle, &vl_cfg, &s_dev.platform.handle));
 
-    // ---- Init all 8 sensors ----
-    for (int i = 0; i < TOF_SENSOR_COUNT; i++) {
-        s_sensor_ok[i] = init_sensor(i) ? 1 : 0;
-        // Update public ok flags under mutex immediately
-        xSemaphoreTake(s_scan_mutex, portMAX_DELAY);
-        s_scan.sensor_ok[i] = s_sensor_ok[i];
-        xSemaphoreGive(s_scan_mutex);
-    }
+    // ---- Init all 8 sensors — retry until all are up ----
+    // mission_task blocks arming until tof_sensors_ok_count() == TOF_SENSOR_COUNT,
+    // so we must keep retrying here rather than giving up after one pass.
+    for (;;) {
+        int ok_count = 0;
+        for (int i = 0; i < TOF_SENSOR_COUNT; i++) {
+            if (s_sensor_ok[i]) { ok_count++; continue; }   // already up
 
-    int ok_count = 0;
-    for (int i = 0; i < TOF_SENSOR_COUNT; i++) ok_count += s_sensor_ok[i];
-    ESP_LOGI(TAG, "%d / %d sensors ready", ok_count, TOF_SENSOR_COUNT);
+            s_sensor_ok[i] = init_sensor(i) ? 1 : 0;
+            if (!s_sensor_ok[i]) {
+                // Bus may be stuck — reset and give it a moment before next pass
+                i2c_master_bus_reset(s_bus_handle);
+                vTaskDelay(pdMS_TO_TICKS(50));
+            }
+
+            xSemaphoreTake(s_scan_mutex, portMAX_DELAY);
+            s_scan.sensor_ok[i] = s_sensor_ok[i];
+            xSemaphoreGive(s_scan_mutex);
+
+            if (s_sensor_ok[i]) ok_count++;
+        }
+
+        ESP_LOGI(TAG, "%d / %d sensors ready", ok_count, TOF_SENSOR_COUNT);
+        if (ok_count == TOF_SENSOR_COUNT) break;
+
+        ESP_LOGW(TAG, "Retrying failed sensors in 500 ms...");
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
 
     // ---- Round-robin polling loop ----
     // Pattern from mapper.c: select mux, check data ready, extract if ready.
@@ -382,7 +398,7 @@ void tof_task(void *arg)
                 xSemaphoreGive(s_scan_mutex);
             }
 
-            ok_count = 0;
+            int ok_count = 0;
             for (int i = 0; i < TOF_SENSOR_COUNT; i++) ok_count += s_sensor_ok[i];
             ESP_LOGW(TAG, "Bus recovery complete — %d / %d sensors restored",
                      ok_count, TOF_SENSOR_COUNT);
@@ -392,8 +408,20 @@ void tof_task(void *arg)
             continue;
         }
 
-        // Skip sensors that failed init
+        // Periodically re-attempt init on any sensor that dropped out
         if (!s_sensor_ok[sensor]) {
+            uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+            static uint32_t last_reinit_ms[TOF_SENSOR_COUNT] = {0};
+            if ((now_ms - last_reinit_ms[sensor]) >= 2000) {
+                last_reinit_ms[sensor] = now_ms;
+                ESP_LOGW(TAG, "[%d] sensor offline — attempting re-init", sensor);
+                s_sensor_ok[sensor] = init_sensor(sensor) ? 1 : 0;
+                xSemaphoreTake(s_scan_mutex, portMAX_DELAY);
+                s_scan.sensor_ok[sensor] = s_sensor_ok[sensor];
+                xSemaphoreGive(s_scan_mutex);
+                if (s_sensor_ok[sensor])
+                    ESP_LOGI(TAG, "[%d] sensor recovered", sensor);
+            }
             vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
             continue;
         }
