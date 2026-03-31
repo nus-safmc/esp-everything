@@ -109,7 +109,7 @@ static void mission_task(void *arg)
     /* ------------------------------------------------------------------ */
     ESP_LOGI(TAG, "Arming...");
     while (1) {
-        if (at_detect_land_requested()) goto precision_landing;
+        // if (at_detect_land_requested()) goto precision_landing;
         mavlink_arm(true);
         vTaskDelay(pdMS_TO_TICKS(500));
         if (mavlink_get_state().armed) {
@@ -174,7 +174,7 @@ precision_landing:
     vTaskDelay(pdMS_TO_TICKS(200));
 
     {
-#define PRECISION_TIMEOUT_MS  60000
+#define PRECISION_TIMEOUT_MS  30000
 #define POSE_UPDATE_THRESH_M  0.15f
 
         uint32_t pl_start_ms  = (uint32_t)(esp_timer_get_time() / 1000);

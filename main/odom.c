@@ -4,6 +4,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include <string.h>
 
@@ -23,6 +24,10 @@ static float             s_offset_y = 0.0f;
 /* start_offset kept separately so drift can be expressed relative to it */
 static float             s_start_x  = 0.0f;
 static float             s_start_y  = 0.0f;
+
+/* Timestamp (ms since boot) of last successful odom_on_tag_seen call.
+ * 0 = no nav tag has ever been seen. */
+static uint32_t          s_last_reloc_ms = 0;
 
 static SemaphoreHandle_t s_mutex;
 
@@ -128,6 +133,7 @@ void odom_on_tag_seen(int tag_id, float cam_tag_x, float cam_tag_y)
     float new_offset_y = s_start_y + drift_y;
     s_offset_x = new_offset_x;
     s_offset_y = new_offset_y;
+    s_last_reloc_ms = (uint32_t)(esp_timer_get_time() / 1000);
     xSemaphoreGive(s_mutex);
 
     ESP_LOGI(TAG, "map_T_odom refined: tag %d  "
@@ -139,6 +145,23 @@ void odom_on_tag_seen(int tag_id, float cam_tag_x, float cam_tag_y)
              state.x, state.y,
              drift_x, drift_y,
              new_offset_x, new_offset_y);
+}
+
+/* ---------------------------------------------------------------------------
+ * Relocalisation age
+ * --------------------------------------------------------------------------- */
+
+uint16_t odom_reloc_age_s(void)
+{
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    uint32_t last = s_last_reloc_ms;
+    xSemaphoreGive(s_mutex);
+
+    if (last == 0) return 0xFFFF;   /* never seen a nav tag */
+
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    uint32_t age_s  = (now_ms - last) / 1000;
+    return (age_s > 0xFFFE) ? 0xFFFE : (uint16_t)age_s;
 }
 
 /* ---------------------------------------------------------------------------

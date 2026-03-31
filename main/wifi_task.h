@@ -53,6 +53,8 @@ typedef struct __attribute__((packed)) {
     uint8_t  vfh_blocked[VFH_BINS];         /* 1 = blocked, 0 = free            */
     uint8_t  is_stuck;                      /* 1 = STUCK or RETREATING          */
 
+    uint16_t reloc_age_s;                   /* seconds since last nav-tag fix   */
+
     uint16_t crumb_batch_start;             /* index of first crumb in batch    */
     uint8_t  crumb_batch_count;             /* number of crumbs in this packet  */
     crumb_t  crumb_batch[WIFI_MAX_CRUMBS_PKT]; /* crumb data                   */

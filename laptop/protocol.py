@@ -52,9 +52,10 @@ NAV_STATE_NAMES = {
 
 # Fixed header: pkt_type, drone_id, ned_x, ned_y, heading_rad,
 #               nav_state, tag_id, tag_dist_m, crumb_count, crumb_last_sent,
-#               vfh_blocked[32], is_stuck, crumb_batch_start, crumb_batch_count
-_TELEM_HDR_FMT  = "<BBfffBbfHH32sBHB"
-_TELEM_HDR_SIZE = struct.calcsize(_TELEM_HDR_FMT)   # 60 bytes
+#               vfh_blocked[32], is_stuck, reloc_age_s, crumb_batch_start,
+#               crumb_batch_count
+_TELEM_HDR_FMT  = "<BBfffBbfHH32sBHHB"
+_TELEM_HDR_SIZE = struct.calcsize(_TELEM_HDR_FMT)   # 62 bytes
 _CRUMB_FMT      = "<ff"
 _CRUMB_SIZE     = struct.calcsize(_CRUMB_FMT)        # 8 bytes
 
@@ -72,6 +73,7 @@ class TelemetryPacket:
     crumb_last_sent:   int              # 0xFFFF = none sent yet
     vfh_blocked:       list            # VFH_BINS bools
     is_stuck:          bool
+    reloc_age_s:       int              # seconds since last nav-tag fix (0xFFFF = never)
     crumb_batch_start: int
     crumbs:            list            # list of (x, y) floats, new this packet
 
@@ -88,7 +90,7 @@ def parse_telemetry(data: bytes) -> Optional[TelemetryPacket]:
     fields = struct.unpack_from(_TELEM_HDR_FMT, data, 0)
     (pkt_type, drone_id, ned_x, ned_y, heading_rad,
      nav_state, tag_id, tag_dist_m, crumb_count, crumb_last_sent,
-     vfh_raw, is_stuck, crumb_batch_start, crumb_batch_count) = fields
+     vfh_raw, is_stuck, reloc_age_s, crumb_batch_start, crumb_batch_count) = fields
 
     if pkt_type != PKT_TELEM:
         return None
@@ -116,6 +118,7 @@ def parse_telemetry(data: bytes) -> Optional[TelemetryPacket]:
         crumb_last_sent   = crumb_last_sent,
         vfh_blocked       = vfh_blocked,
         is_stuck          = bool(is_stuck),
+        reloc_age_s       = reloc_age_s,
         crumb_batch_start = crumb_batch_start,
         crumbs            = crumbs,
     )

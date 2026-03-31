@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import logging
+import math
 import signal
 import sys
 import threading
@@ -71,11 +72,13 @@ def main():
                          config_path=args.config)
 
     GOAL_INTERVAL = 2.5 # seconds between goal updates per drone
+    RELOC_AGE_THRESHOLD_S = 120  # send drone to nav tag after this many seconds without a fix
 
     # Per-drone state
     last_goal_time: dict[int, float]              = {d: 0.0 for d in drone_ids}
     goal_counts:    dict[int, int]                = {d: 0 for d in drone_ids}
     drone_state:    dict[int, TelemetryPacket | None] = {d: None for d in drone_ids}
+    reloc_sent:     dict[int, bool]               = {d: False for d in drone_ids}
     last_log_time = 0.0
 
     exploring = False
@@ -112,6 +115,39 @@ def main():
 
         if not exploring or did not in exploring_drones:
             return
+
+        # --- Relocalisation: send drone to nearest nav tag if odom is stale ---
+        # Skip if drone has found a target tag — don't pull it away from landing
+        needs_reloc = (pkt.tag_id < 0
+                       and pkt.reloc_age_s != 0xFFFF
+                       and pkt.reloc_age_s > RELOC_AGE_THRESHOLD_S)
+
+        if needs_reloc and not reloc_sent[did]:
+            # Find closest nav tag to minimise travel time
+            best_tag = None
+            best_dist = float("inf")
+            for tag in director.nav_tags:
+                d = math.hypot(tag.map_x - map_x, tag.map_y - map_y)
+                if d < best_dist:
+                    best_dist = d
+                    best_tag = tag
+            if best_tag is not None:
+                log.warning("drone=%d  reloc_age=%ds > %ds — sending to nav tag %d "
+                            "at (%.2f, %.2f)  dist=%.1fm",
+                            did, pkt.reloc_age_s, RELOC_AGE_THRESHOLD_S,
+                            best_tag.id, best_tag.map_x, best_tag.map_y, best_dist)
+                cmd = CommandPacket(CMD_GOTO, goal_x=best_tag.map_x,
+                                    goal_y=best_tag.map_y)
+                comms.send_command(did, cmd)
+                reloc_sent[did] = True
+                last_goal_time[did] = now
+                return
+
+        # Clear reloc flag once the drone has relocalised
+        if reloc_sent[did] and not needs_reloc:
+            log.info("drone=%d  relocalised (reloc_age=%ds) — resuming exploration",
+                     did, pkt.reloc_age_s)
+            reloc_sent[did] = False
 
         # --- Send exploration goal when this drone is ready (rate-limited) ---
         if pkt.nav_state in (NAV_IDLE, NAV_ARRIVED, NAV_STUCK) \

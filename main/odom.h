@@ -67,6 +67,14 @@ bool odom_find_nav_tag(int tag_id, nav_tag_t *out);
 void odom_on_tag_seen(int tag_id, float cam_tag_x, float cam_tag_y);
 
 /* ---------------------------------------------------------------------------
+ * Relocalisation age  (thread-safe)
+ * --------------------------------------------------------------------------- */
+
+/* Seconds since the last nav-tag sighting (odom_on_tag_seen call).
+ * Returns 0xFFFF if no tag has ever been seen.  Capped at 0xFFFE. */
+uint16_t odom_reloc_age_s(void);
+
+/* ---------------------------------------------------------------------------
  * Frame conversion  (thread-safe, use current map_T_odom)
  * --------------------------------------------------------------------------- */
 
