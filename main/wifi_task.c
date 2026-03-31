@@ -301,6 +301,8 @@ void wifi_task(void *arg)
         for (int b = 0; b < VFH_BINS; b++)
             pkt.vfh_blocked[b] = ns.vfh_blocked[b] ? 1 : 0;
 
+        pkt.reloc_age_s = odom_reloc_age_s();
+
         /* Crumb batch — send any unsent crumbs */
         int total_crumbs = crumb_count();
         int last_sent    = crumb_last_sent();

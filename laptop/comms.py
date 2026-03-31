@@ -248,6 +248,14 @@ class CommsNode:
                     self._tag_registry[pkt.tag_id] = pkt.drone_id
                     log.info("Tag %d registered to drone %d",
                              pkt.tag_id, pkt.drone_id)
+                elif pkt.tag_id < 0:
+                    # Drone released its tag claim (failed landing) — free it for others
+                    released = [t for t, d in self._tag_registry.items()
+                                if d == pkt.drone_id]
+                    for t in released:
+                        del self._tag_registry[t]
+                        log.info("Tag %d released by drone %d (failed landing)",
+                                 t, pkt.drone_id)
 
             # Push the per-drone nav-tags packet immediately on first contact
             if is_new_drone:
