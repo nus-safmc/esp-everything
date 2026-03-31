@@ -190,24 +190,22 @@ static bool collision_avoid(float goal_z)
     float repulse_n = repulse_fwd * cos_h - repulse_rght * sin_h;
     float repulse_e = repulse_fwd * sin_h + repulse_rght * cos_h;
 
-    /* Normalise repulsion and project a position carrot in the escape direction */
+    /* Normalise and scale to fixed escape speed */
     float ned_mag = sqrtf(repulse_n * repulse_n + repulse_e * repulse_e);
     if (ned_mag < 1e-6f) return false;
 
-    float unit_n = repulse_n / ned_mag;
-    float unit_e = repulse_e / ned_mag;
-    float escape_x = drone.x + COLLISION_SPEED_MS * NAV_POS_LOOKAHEAD_S * unit_n;
-    float escape_y = drone.y + COLLISION_SPEED_MS * NAV_POS_LOOKAHEAD_S * unit_e;
+    float vn = COLLISION_SPEED_MS * (repulse_n / ned_mag);
+    float ve = COLLISION_SPEED_MS * (repulse_e / ned_mag);
 
-    mavlink_set_position_ned(escape_x, escape_y, goal_z, drone.heading);
+    mavlink_set_velocity_xy_position_z(vn, ve, goal_z, drone.heading);
 
     if (!s_collision_active) {
-        ESP_LOGW(TAG, "COLLISION AVOID — %d threats, closest=%.2fm, escape dir=(%.2f,%.2f)",
-                 threats, closest, unit_n, unit_e);
+        ESP_LOGW(TAG, "COLLISION AVOID — %d threats, closest=%.2fm, escape=(%.2f,%.2f) m/s",
+                 threats, closest, vn, ve);
         s_collision_active = true;
     } else {
-        ESP_LOGD(TAG, "COLLISION: %d threats, closest=%.2fm, escape dir=(%.2f,%.2f)",
-                 threats, closest, unit_n, unit_e);
+        ESP_LOGD(TAG, "COLLISION: %d threats, closest=%.2fm, vel=(%.2f,%.2f)",
+                 threats, closest, vn, ve);
     }
 
     return true;
@@ -248,8 +246,8 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
     float dy   = goal_y - drone.y;
     float dist = sqrtf(dx * dx + dy * dy);
 
-    /* Altitude is held by PX4's position controller via the Z field in every
-     * position setpoint — nothing to do here. */
+    /* Altitude is held by PX4's own position controller via the Z-position
+     * field in the mixed velocity/position setpoint — nothing to do here. */
 
     /* ---- Check arrival ---- */
     if (dist < NAV_ARRIVE_RADIUS_M) {
@@ -343,13 +341,13 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
             mavlink_set_position_ned(drone.x, drone.y, nav.goal_z, desired_yaw);
 
         } else {
-            /* ---- FLYING: aligned — advance position carrot in desired_yaw ----
+            /* ---- FLYING: aligned — fly forward at desired_yaw ----
              * VFH re-evaluates every tick; if an obstacle causes |steering| to
              * exceed NAV_YAW_TOL_RAD, the drone stops and re-aligns. */
             new_state = NAV_FLYING;
-            float target_x = drone.x + NAV_CRUISE_SPEED_MS * NAV_POS_LOOKAHEAD_S * cosf(desired_yaw);
-            float target_y = drone.y + NAV_CRUISE_SPEED_MS * NAV_POS_LOOKAHEAD_S * sinf(desired_yaw);
-            mavlink_set_position_ned(target_x, target_y, nav.goal_z, desired_yaw);
+            float vx = NAV_CRUISE_SPEED_MS * cosf(desired_yaw);
+            float vy = NAV_CRUISE_SPEED_MS * sinf(desired_yaw);
+            mavlink_set_velocity_xy_position_z(vx, vy, nav.goal_z, desired_yaw);
         }
 
         ESP_LOGD(TAG, "state=%d dist=%.2f err=%.1f° steer=%.1f° free=%d",

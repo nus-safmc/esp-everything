@@ -70,7 +70,18 @@ void mavlink_task(void *arg);
 // Setpoint API  (call from mission_task — thread-safe via mutex)
 // ---------------------------------------------------------------------------
 
-// Position setpoint: x/y/z in NED metres, yaw in radians (0 = North, CW+)
+// Velocity mode: vx/vy/vz in NED m/s, yaw_rate in rad/s
+// Unused position fields are sent as NaN automatically.
+void mavlink_set_velocity_ned(float vx, float vy, float vz, float yaw_rate);
+
+// Mixed mode: XY velocity (m/s NED) + Z position (NED metres, negative = above ground)
+// + yaw position (NED radians, 0 = North, CW positive).
+// PX4 holds altitude and yaw via its own controllers; XY velocity controller
+// moves horizontally. Ideal for navigation at a fixed cruise altitude.
+void mavlink_set_velocity_xy_position_z(float vx, float vy, float z, float yaw);
+
+// Position hold: x/y/z in NED metres, yaw in radians (0 = North, CW+)
+// Unused velocity fields are sent as NaN automatically.
 void mavlink_set_position_ned(float x, float y, float z, float yaw);
 
 // Stop all motion — switches to position hold at current location.

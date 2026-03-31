@@ -22,7 +22,6 @@
  *                      2 avoids retrying on a single-bin noise artefact.
  * --------------------------------------------------------------------------- */
 #define NAV_CRUISE_SPEED_MS     0.55f    /* forward cruise speed (m/s)            */
-#define NAV_POS_LOOKAHEAD_S     1.0f    /* position carrot lookahead (s)         */
 #define NAV_YAW_TOL_RAD         0.1f
 #define NAV_ARRIVE_RADIUS_M     0.25f   /* XY goal-reached radius (m)            */
 #define NAV_STUCK_HOLD_MS       3500    /* hold duration before declaring stuck   */
