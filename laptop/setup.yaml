@@ -13,29 +13,44 @@
 # Used by the laptop for crumb transforms before the first vision fix.
 
 drones:
-  # 0:
-  #   start_x: 0.0
-  #   start_y: 0.0
-  25:
+  11:
     start_x: 0.0
     start_y: 0.0
   8:
     start_x: 0.0
-    start_y: 2.05
-  11:
+    start_y: 1.0
+  2:
     start_x: 0.0
-    start_y: 4.1
+    start_y: 2.0
   6:
     start_x: 0.0
-    start_y: 6.15
+    start_y: 3.0
+  25:
+    start_x: 0.0
+    start_y: 4.0
+  5:
+    start_x: 1.0
+    start_y: 0.0
+  13:
+    start_x: 1.0
+    start_y: 1.0
+  7:
+    start_x: 1.0
+    start_y: 2.0
+  1:
+    start_x: 1.0
+    start_y: 3.0
+  27:
+    start_x: 1.0
+    start_y: 4.0
 
 # Arena bounds (map frame, metres).
 # Goals are clamped inside this rectangle.
 arena:
-  min_x: -1.8
-  max_x: 8.2
-  min_y: -3.2
-  max_y: 6.8
+  min_x: -1.2
+  max_x: 8.8
+  min_y: -2.4
+  max_y: 7.6
 
 # Stuck detection and recovery
 stuck:
@@ -53,10 +68,10 @@ stuck:
 # IDs 0–11 are reserved for landing targets — do NOT add them here.
 # Survey these positions carefully — odometry accuracy depends on it.
 nav_tags:
-  10: {map_x: 1.0, map_y: -0.5}
-  # 11: {map_x: 2.0, map_y: 0.0}
-  # 12: {map_x: 5.0, map_y: 0.0}
-  # 13: {map_x: 1.0, map_y: 3.0}
+  0: {map_x: 9.0, map_y: 3.0}
+  11: {map_x: -1.0, map_y: 3.0}
+  10: {map_x: 4.0, map_y: 8.0}
+  9: {map_x: 4.0, map_y: -2.0}
   # 14: {map_x: 3.0, map_y: 3.0}
   # 15: {map_x: 5.0, map_y: 3.0}
   # 16: {map_x: 1.0, map_y: 6.0}
