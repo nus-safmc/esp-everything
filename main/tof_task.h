@@ -105,3 +105,7 @@ tof_scan_collapsed_t tof_get_collapsed_scan(void);
 // True if at least one sensor has been successfully initialised and
 // has produced a reading in the last 500ms.
 bool tof_is_healthy(void);
+
+// Returns the number of sensors that passed initialisation (0–8).
+// Safe to call from any task after tof_task has completed its init phase.
+int tof_sensors_ok_count(void);

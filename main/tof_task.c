@@ -230,6 +230,16 @@ bool tof_is_healthy(void)
     return (now_ms - latest_ms) < 500;
 }
 
+int tof_sensors_ok_count(void)
+{
+    xSemaphoreTake(s_scan_mutex, portMAX_DELAY);
+    int count = 0;
+    for (int i = 0; i < TOF_SENSOR_COUNT; i++)
+        count += s_scan.sensor_ok[i];
+    xSemaphoreGive(s_scan_mutex);
+    return count;
+}
+
 tof_scan_collapsed_t tof_get_collapsed_scan(void)
 {
     tof_scan_t snap = tof_get_scan();  /* thread-safe snapshot */
