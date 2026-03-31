@@ -347,7 +347,50 @@ void tof_task(void *arg)
     VL53L5CX_ResultsData results;
     TickType_t last_wake = xTaskGetTickCount();
 
+    // I2C bus recovery: after TOF_BUS_FAIL_THRESHOLD consecutive failures
+    // across any sensor, reset the bus and re-init all sensors.
+    #define TOF_BUS_FAIL_THRESHOLD  10
+    int consecutive_fails = 0;
+
     for (uint8_t sensor = 0; ; sensor = (sensor + 1) % TOF_SENSOR_COUNT) {
+
+        // ---- I2C bus recovery ----
+        if (consecutive_fails >= TOF_BUS_FAIL_THRESHOLD) {
+            ESP_LOGE(TAG, "I2C bus hung (%d consecutive failures) — resetting",
+                     consecutive_fails);
+
+            // Invalidate all frames so nav_task holds position during recovery
+            xSemaphoreTake(s_scan_mutex, portMAX_DELAY);
+            for (int i = 0; i < TOF_SENSOR_COUNT; i++) {
+                s_scan.frame[i].valid = 0;
+                s_scan.sensor_ok[i]   = 0;
+            }
+            xSemaphoreGive(s_scan_mutex);
+
+            // Reset the I2C bus (sends 9 SCL clocks to release a stuck SDA)
+            esp_err_t err = i2c_master_bus_reset(s_bus_handle);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "i2c_master_bus_reset failed: %d", err);
+            }
+            vTaskDelay(pdMS_TO_TICKS(100));
+
+            // Re-init all sensors
+            for (int i = 0; i < TOF_SENSOR_COUNT; i++) {
+                s_sensor_ok[i] = init_sensor(i) ? 1 : 0;
+                xSemaphoreTake(s_scan_mutex, portMAX_DELAY);
+                s_scan.sensor_ok[i] = s_sensor_ok[i];
+                xSemaphoreGive(s_scan_mutex);
+            }
+
+            ok_count = 0;
+            for (int i = 0; i < TOF_SENSOR_COUNT; i++) ok_count += s_sensor_ok[i];
+            ESP_LOGW(TAG, "Bus recovery complete — %d / %d sensors restored",
+                     ok_count, TOF_SENSOR_COUNT);
+
+            consecutive_fails = 0;
+            last_wake = xTaskGetTickCount();
+            continue;
+        }
 
         // Skip sensors that failed init
         if (!s_sensor_ok[sensor]) {
@@ -358,6 +401,7 @@ void tof_task(void *arg)
         // Select this sensor on the mux
         if (tca_select(sensor) != ESP_OK) {
             ESP_LOGW(TAG, "[%d] mux select failed", sensor);
+            consecutive_fails++;
             vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
             continue;
         }
@@ -367,9 +411,13 @@ void tof_task(void *arg)
         uint8_t status = vl53l5cx_check_data_ready(&s_dev, &is_ready);
         if (status) {
             ESP_LOGW(TAG, "[%d] check_data_ready status=%d", sensor, status);
+            consecutive_fails++;
             vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
             continue;
         }
+
+        // Successful I2C transaction — reset failure counter
+        consecutive_fails = 0;
 
         if (is_ready) {
             status = vl53l5cx_get_ranging_data(&s_dev, &results);

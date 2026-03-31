@@ -128,6 +128,7 @@ static bool s_collision_active = false;
 static bool collision_avoid(float goal_z)
 {
     if (!mavlink_position_valid()) return false;
+    if (!tof_is_healthy()) return false;   /* stale sensors — let nav_tick hold */
 
     tof_scan_collapsed_t scan = tof_get_collapsed_scan();
     drone_state_t drone = mavlink_get_state();
@@ -257,6 +258,13 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
         s_status.state = NAV_ARRIVED;
         s_status.dist_to_goal = dist;
         xSemaphoreGive(s_mutex);
+        return;
+    }
+
+    /* ---- Guard: hold position if ToF sensors are stale ---- */
+    if (!tof_is_healthy()) {
+        ESP_LOGW(TAG, "ToF sensors stale — holding position");
+        mavlink_set_position_ned(drone.x, drone.y, nav.goal_z, drone.heading);
         return;
     }
 
