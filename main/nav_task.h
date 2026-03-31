@@ -21,6 +21,7 @@
  *  NAV_STUCK_MIN_FREE  Min free VFH bins before exiting STUCK on retry.
  *                      2 avoids retrying on a single-bin noise artefact.
  * --------------------------------------------------------------------------- */
+#define NAV_CRUISE_SPEED_MS     0.35f    /* forward cruise speed (m/s)            */
 #define NAV_CRUISE_SPEED_MS     0.30f    /* forward cruise speed (m/s)            */
 #define NAV_YAW_TOL_RAD         0.1f
 #define NAV_ARRIVE_RADIUS_M     0.25f   /* XY goal-reached radius (m)            */

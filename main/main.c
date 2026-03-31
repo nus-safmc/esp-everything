@@ -212,9 +212,14 @@ precision_landing:
                 goto explore_loop;
             }
 
-            /* Check for a fresh pose reading */
+            /* Check for a fresh pose reading — but stop updating once
+             * we're close to the goal.  Pose updates call nav_set_goal_map
+             * which resets nav state to NAV_ROTATING, preventing arrival. */
+            nav_status_t ns = nav_get_status();
+            bool close_enough = ns.dist_to_goal < NAV_ARRIVE_RADIUS_M * 2.0f;
+
             at_detect_pose_t pose = at_detect_get_pose();
-            if (pose.valid && pose.detect_ms != last_detect_ms) {
+            if (!close_enough && pose.valid && pose.detect_ms != last_detect_ms) {
                 last_detect_ms = pose.detect_ms;
                 float dn, de, hdist;
                 camera_to_ned(pose.tx, pose.ty, pose.tz, pose.drone_heading,
@@ -234,7 +239,7 @@ precision_landing:
                 }
             }
 
-            if (nav_get_status().state == NAV_ARRIVED) {
+            if (ns.state == NAV_ARRIVED) {
                 ESP_LOGI(TAG, "Above tag — landing");
                 nav_cancel();
                 break;
