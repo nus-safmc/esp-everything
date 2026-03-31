@@ -350,11 +350,14 @@ static void nav_tick(const vfh_config_t *vfh_cfg)
              * ToF round-robin updates time to catch up. */
             new_state = NAV_FLYING;
 
-            /* Find min range in ±45° forward arc from collapsed scan */
+            /* Find min range in ±45° arc around the current heading (0° body frame).
+             * Must use 0.0f here, NOT steering — the drone's momentum is forward
+             * regardless of where VFH is steering.  Using steering causes the ramp
+             * to miss a wall dead-ahead when VFH has already decided to turn. */
             float min_fwd = 999.0f;
             for (int i = 0; i < COLLISION_SCAN_PTS; i++) {
                 float bin_rad = (float)i * (2.0f * (float)M_PI / (float)COLLISION_SCAN_PTS);
-                float diff = wrap_pi(bin_rad - steering);
+                float diff = wrap_pi(bin_rad);   /* diff from forward (0°) */
                 if (fabsf(diff) <= (float)M_PI / 4.0f && scan.ranges[i] < min_fwd) {
                     min_fwd = scan.ranges[i];
                 }
